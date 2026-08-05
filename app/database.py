@@ -38,7 +38,8 @@ def initialise() -> None:
             END;
             CREATE TABLE IF NOT EXISTS assets (
               id TEXT PRIMARY KEY, original_name TEXT NOT NULL, mime_type TEXT NOT NULL,
-              path TEXT NOT NULL, created_at TEXT NOT NULL
+              path TEXT NOT NULL, label TEXT NOT NULL DEFAULT '',
+              description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS posts (
               id TEXT PRIMARY KEY, status TEXT NOT NULL, caption TEXT NOT NULL, headline TEXT,
@@ -60,6 +61,11 @@ def initialise() -> None:
         defaults = {"posts_per_day": "1", "timezone": "Asia/Dhaka", "mode": "approval", "enabled": "false", "posting_times": '["10:00"]'}
         for key, value in defaults.items():
             db.execute("INSERT OR IGNORE INTO settings VALUES (?, ?)", (key, value))
+        asset_columns = {row['name'] for row in db.execute('PRAGMA table_info(assets)')}
+        if 'label' not in asset_columns:
+            db.execute("ALTER TABLE assets ADD COLUMN label TEXT NOT NULL DEFAULT ''")
+        if 'description' not in asset_columns:
+            db.execute("ALTER TABLE assets ADD COLUMN description TEXT NOT NULL DEFAULT ''")
 
 
 def rows(query: str, parameters: tuple = ()) -> list[dict]:

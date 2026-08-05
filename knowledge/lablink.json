@@ -1,0 +1,408 @@
+[
+  {
+    "id": "lablink-platform-overview",
+    "title": "LabLink platform overview",
+    "type": "platform",
+    "text": "LabLink is a multi-tenant diagnostic-center management platform. It brings diagnostic-center operations into one platform, including patients, diagnostic workflows, appointments, billing, notifications, subscriptions, and center administration. Do not describe it as a medical diagnostic device or make clinical-outcome claims.",
+    "sourceUrl": "lablink://SUMMARY.md;specs/doc1-architecture-overview.md"
+  },
+  {
+    "id": "lablink-tenant-isolation",
+    "title": "Center-scoped operations",
+    "type": "platform",
+    "text": "LabLink scopes operational data to each diagnostic center. Product copy may say it supports separate center operations and center-specific configuration. Do not make unverified compliance, encryption, HIPAA, or security-certification claims.",
+    "sourceUrl": "lablink://specs/doc1-architecture-overview.md"
+  },
+  {
+    "id": "lablink-center-branding",
+    "title": "Center branding and public profile",
+    "type": "feature",
+    "text": "Each diagnostic center can maintain its own public information and branding, including name, tagline, logo, color, address, contact details, opening hours, and selected landing-page statistics. Use only the actual center’s approved figures in a post.",
+    "sourceUrl": "lablink://specs/center/models.md;specs/frontend/public-pages.md"
+  },
+  {
+    "id": "lablink-language",
+    "title": "Center language preference",
+    "type": "feature",
+    "text": "A diagnostic center has a default UI language setting with English and Bangla options. Do not claim every screen or message is fully translated unless that is separately verified.",
+    "sourceUrl": "lablink://specs/center/models.md"
+  },
+  {
+    "id": "lablink-role-based-access",
+    "title": "Role-based access",
+    "type": "feature",
+    "text": "LabLink defines distinct responsibilities for center administrators, receptionists, lab technicians, doctors, and patients. Product posts can focus on giving each role a relevant workspace, but must not claim unrestricted access or a specific permission unless verified.",
+    "sourceUrl": "lablink://specs/doc5-workflow-guide.md;specs/center/permissions.md"
+  },
+  {
+    "id": "lablink-patient-registration",
+    "title": "Patient registration",
+    "type": "workflow",
+    "text": "Diagnostic-center staff can register patient information as part of the center workflow. Posts should focus on organized patient intake and avoid using real patient details, screenshots containing personal data, or promises about clinical outcomes.",
+    "sourceUrl": "lablink://specs/doc5-workflow-guide.md;specs/center/registration.md"
+  },
+  {
+    "id": "lablink-walk-in-orders",
+    "title": "Walk-in diagnostic workflow",
+    "type": "workflow",
+    "text": "LabLink’s workflow documentation supports diagnostic centers handling walk-in patients and recording diagnostic orders from external paper prescriptions. Keep claims role-neutral until the product team confirms the exact create-order permissions in the deployed version.",
+    "sourceUrl": "lablink://specs/doc5-workflow-guide.md;specs/diagnostics/models.md"
+  },
+  {
+    "id": "lablink-test-order-status",
+    "title": "Test-order progress",
+    "type": "feature",
+    "text": "A diagnostic test order tracks its progress with PENDING, IN_PROGRESS, COMPLETED, and CANCELLED states. It can also record normal or urgent priority and clinical notes from the prescription workflow.",
+    "sourceUrl": "lablink://specs/diagnostics/models.md;specs/diagnostics/test-orders.md"
+  },
+  {
+    "id": "lablink-center-test-pricing",
+    "title": "Center-specific test pricing",
+    "type": "feature",
+    "text": "LabLink supports a global diagnostic-test catalog with center-specific pricing and availability overrides. A center can control whether it offers a test and set its own price for that test.",
+    "sourceUrl": "lablink://specs/diagnostics/models.md;specs/diagnostics/test-orders.md"
+  },
+  {
+    "id": "lablink-referring-doctors",
+    "title": "Referring-doctor records",
+    "type": "feature",
+    "text": "Centers can maintain a scoped list of external referring doctors for quick selection during diagnostic workflows. These records can include a doctor’s name, designation, institution, and active status.",
+    "sourceUrl": "lablink://specs/diagnostics/models.md;specs/diagnostics/test-orders.md"
+  },
+  {
+    "id": "lablink-report-lifecycle",
+    "title": "Diagnostic report lifecycle",
+    "type": "workflow",
+    "text": "LabLink supports a report lifecycle of DRAFT, VERIFIED, and DELIVERED. Authorized staff create reports, verify them, print them when needed, and can mark verified reports as delivered.",
+    "sourceUrl": "lablink://specs/diagnostics/reports.md;specs/doc5-workflow-guide.md"
+  },
+  {
+    "id": "lablink-report-verification",
+    "title": "Report verification records",
+    "type": "feature",
+    "text": "When a report is verified, LabLink records who verified it and when. Marketing may describe a reviewable verification step, but must not claim regulatory certification or diagnostic accuracy.",
+    "sourceUrl": "lablink://specs/diagnostics/reports.md;specs/diagnostics/models.md"
+  },
+  {
+    "id": "lablink-batch-report-verify",
+    "title": "Batch report verification",
+    "type": "feature",
+    "text": "Authorized users can batch-verify reports belonging to their center. Already verified reports are skipped, and notifications can be grouped by patient when multiple reports are verified together.",
+    "sourceUrl": "lablink://specs/diagnostics/reports.md;specs/notifications/email-sms.md"
+  },
+  {
+    "id": "lablink-report-templates",
+    "title": "Center-specific report templates",
+    "type": "feature",
+    "text": "A center can define one report template per test type. When a matching template exists, it can pre-populate the expected result fields, units, and reference-range structure for the lab technician to complete.",
+    "sourceUrl": "lablink://specs/diagnostics/templates.md"
+  },
+  {
+    "id": "lablink-reference-ranges",
+    "title": "Structured reference-range fields",
+    "type": "feature",
+    "text": "Report templates can hold universal, gender-specific, and child reference-range fields. This is a reporting-structure feature; never turn it into medical advice or claim that the software interprets or diagnoses results.",
+    "sourceUrl": "lablink://specs/diagnostics/templates.md;specs/doc5-workflow-guide.md"
+  },
+  {
+    "id": "lablink-freeform-reporting",
+    "title": "Flexible report entry",
+    "type": "feature",
+    "text": "If a matching report template is unavailable, a report can start with free-form result text. This gives diagnostic-center teams flexibility alongside structured template-based reporting.",
+    "sourceUrl": "lablink://specs/diagnostics/templates.md"
+  },
+  {
+    "id": "lablink-report-printing",
+    "title": "Report printing",
+    "type": "feature",
+    "text": "LabLink supports print-ready report data with center details, patient information, referring doctor details, structured results, and report metadata. Centers can configure paper size and whether they use pre-printed paper.",
+    "sourceUrl": "lablink://specs/diagnostics/reports.md;specs/center/models.md;specs/doc5-workflow-guide.md"
+  },
+  {
+    "id": "lablink-preprinted-paper",
+    "title": "Pre-printed paper support",
+    "type": "feature",
+    "text": "For centers using pre-printed stationery, report printing can preserve header space while hiding duplicate header content. Avoid claiming support for a particular printer or paper stock unless tested.",
+    "sourceUrl": "lablink://specs/doc5-workflow-guide.md;specs/center/models.md"
+  },
+  {
+    "id": "lablink-public-report-links",
+    "title": "Time-limited report access",
+    "type": "feature",
+    "text": "LabLink supports public report access through a signed, time-limited link. The documented default link expiry is three days and access is counted. Posts must never display a real report link, QR code, patient name, or result.",
+    "sourceUrl": "lablink://specs/diagnostics/reports.md;specs/frontend/public-pages.md"
+  },
+  {
+    "id": "lablink-report-history",
+    "title": "Report result history",
+    "type": "feature",
+    "text": "LabLink includes a result-history or delta-check endpoint for reports. Describe it as access to historical report information only; do not claim automated clinical trend interpretation.",
+    "sourceUrl": "lablink://specs/diagnostics/reports.md"
+  },
+  {
+    "id": "lablink-report-audit-preservation",
+    "title": "Report audit preservation",
+    "type": "feature",
+    "text": "Report deletion is designed as a soft delete: records are excluded from normal queries while preserving the database record and deletion timestamp for audit purposes.",
+    "sourceUrl": "lablink://specs/diagnostics/reports.md;specs/doc5-workflow-guide.md"
+  },
+  {
+    "id": "lablink-report-ready-email",
+    "title": "Report-ready email notification",
+    "type": "notification",
+    "text": "When a report is verified, LabLink can send a REPORT_READY email to the patient when the center has email notifications enabled and the patient has an email address. Multiple verified reports can use a grouped BATCH_REPORT_READY email per patient.",
+    "sourceUrl": "lablink://specs/notifications/email-sms.md;specs/diagnostics/reports.md;specs/center/spec.md"
+  },
+  {
+    "id": "lablink-report-ready-sms",
+    "title": "Report-ready SMS notification",
+    "type": "notification",
+    "text": "When a report is verified, LabLink can send an SMS notification when SMS is enabled for the center, an SMS API key is configured, and the patient has a phone number. SMS delivery uses the configured SMS provider and is not guaranteed if provider configuration or delivery fails.",
+    "sourceUrl": "lablink://specs/notifications/email-sms.md;specs/diagnostics/reports.md;specs/center/spec.md"
+  },
+  {
+    "id": "lablink-notification-resend",
+    "title": "Report notification resend controls",
+    "type": "notification",
+    "text": "Authorized users can resend report email or SMS notifications for verified or delivered reports. The documented resend limit is three requests per hour per user per report.",
+    "sourceUrl": "lablink://specs/diagnostics/reports.md;specs/notifications/email-sms.md"
+  },
+  {
+    "id": "lablink-notification-guardrails",
+    "title": "Notification conditions and accuracy",
+    "type": "brand-rule",
+    "text": "Do not write that every patient always receives an email or SMS. Delivery depends on enabled center settings, valid patient contact details, configured providers, and successful dispatch. Never claim instant delivery or guaranteed message receipt.",
+    "sourceUrl": "lablink://specs/notifications/email-sms.md;specs/center/spec.md"
+  },
+  {
+    "id": "lablink-voice-benefit-boundary",
+    "title": "Voice notification claim boundary",
+    "type": "brand-rule",
+    "text": "Subscription rules list voice as a plan-gated delivery capability and describe included voice quantities, but the inspected notification specifications do not document an implemented outbound voice-call workflow. Do not claim LabLink automatically calls patients when reports are ready until the product team verifies and documents that implementation.",
+    "sourceUrl": "lablink://specs/subscriptions/models.md;specs/subscriptions/workflows.md;specs/notifications/email-sms.md"
+  },
+  {
+    "id": "lablink-online-delivery-benefit",
+    "title": "Plan-gated delivery capabilities",
+    "type": "feature",
+    "text": "Subscription rules identify SMS, email, voice, and online delivery as capabilities that require the corresponding plan benefit. Any campaign must say 'available on eligible plans' until the current plan matrix is supplied.",
+    "sourceUrl": "lablink://specs/subscriptions/workflows.md"
+  },
+  {
+    "id": "lablink-appointment-booking",
+    "title": "Online appointment booking",
+    "type": "feature",
+    "text": "A center can enable online appointment booking. Patient self-booking creates a pending appointment for staff confirmation, and the public flow can present available doctor time slots.",
+    "sourceUrl": "lablink://specs/appointments/workflows.md;specs/frontend/public-pages.md;specs/center/models.md"
+  },
+  {
+    "id": "lablink-appointment-status",
+    "title": "Appointment status updates",
+    "type": "workflow",
+    "text": "LabLink supports appointment states including pending, confirmed, completed, cancelled, and no-show. Appointment status changes can trigger documented booking, confirmation, and cancellation emails when a patient email is available.",
+    "sourceUrl": "lablink://specs/appointments/workflows.md;specs/notifications/email-sms.md"
+  },
+  {
+    "id": "lablink-appointment-invoices",
+    "title": "Appointment-to-invoice workflow",
+    "type": "workflow",
+    "text": "When an appointment moves to completed, LabLink can automatically create a linked invoice. If the appointment later moves away from completed, non-cancelled linked invoices are cancelled.",
+    "sourceUrl": "lablink://specs/appointments/workflows.md"
+  },
+  {
+    "id": "lablink-doctor-consultations",
+    "title": "Doctor consultation workflow",
+    "type": "feature",
+    "text": "LabLink includes a doctor consultation workflow connected to appointments. Describe it as an operational feature for center doctors; do not use it to imply telemedicine, diagnosis quality, or a specific consultation modality.",
+    "sourceUrl": "lablink://specs/appointments/workflows.md;specs/frontend/pages.md"
+  },
+  {
+    "id": "lablink-invoices",
+    "title": "Diagnostic-service invoicing",
+    "type": "feature",
+    "text": "Center staff can create diagnostic-service invoices with itemized services, auto-resolved test pricing, discounts, notes, generated invoice numbers, and print data. This is separate from LabLink’s own platform subscription billing.",
+    "sourceUrl": "lablink://specs/payments/invoices.md;specs/payments/models.md"
+  },
+  {
+    "id": "lablink-invoice-audit-log",
+    "title": "Invoice audit history",
+    "type": "feature",
+    "text": "Invoice operations keep an audit trail of who changed an invoice, what action occurred, what changed, and when. Posts may describe better operational traceability, but not regulatory compliance unless independently verified.",
+    "sourceUrl": "lablink://specs/payments/invoices.md"
+  },
+  {
+    "id": "lablink-payment-status",
+    "title": "Invoice status management",
+    "type": "workflow",
+    "text": "Diagnostic-service invoices have an issuance, payment, and cancellation workflow. Only issued invoices can be edited, and edits require a reason for the audit trail.",
+    "sourceUrl": "lablink://specs/payments/invoices.md"
+  },
+  {
+    "id": "lablink-daily-dashboard",
+    "title": "Daily center overview",
+    "type": "feature",
+    "text": "Center administrators can access a daily analytics summary that includes reports created, revenue, patient count, and pending orders for the day.",
+    "sourceUrl": "lablink://specs/diagnostics/analytics.md"
+  },
+  {
+    "id": "lablink-revenue-analytics",
+    "title": "Revenue analytics",
+    "type": "feature",
+    "text": "LabLink analytics can show revenue by test type, revenue over time, revenue by referring doctor, and invoice revenue summaries. Analytics are scoped to the center and available to center administrators.",
+    "sourceUrl": "lablink://specs/diagnostics/analytics.md"
+  },
+  {
+    "id": "lablink-patient-analytics",
+    "title": "Patient and appointment analytics",
+    "type": "feature",
+    "text": "Center administrators can view new-versus-returning patient metrics, appointment counts and status breakdowns, and turnaround-time statistics by test type over a selected lookback period.",
+    "sourceUrl": "lablink://specs/diagnostics/analytics.md"
+  },
+  {
+    "id": "lablink-plan-trial",
+    "title": "Subscription trials",
+    "type": "feature",
+    "text": "LabLink subscription plans can include a trial period. A center can use one trial, and the documented default trial duration is 14 days when a plan does not override it. Do not advertise a free trial duration unless the active pricing page confirms it.",
+    "sourceUrl": "lablink://specs/subscriptions/models.md;docs/subscription-payments.md"
+  },
+  {
+    "id": "lablink-plan-benefits",
+    "title": "Plan benefits and usage limits",
+    "type": "feature",
+    "text": "Subscription plans can define benefits such as staff-account limits, monthly report limits, and optional AI credits. Benefit availability is plan-specific, so posts must use the current approved plan matrix rather than naming limits from development documents.",
+    "sourceUrl": "lablink://specs/subscriptions/models.md;specs/subscriptions/workflows.md;docs/subscription-payments.md"
+  },
+  {
+    "id": "lablink-subscription-self-service",
+    "title": "Subscription self-service",
+    "type": "feature",
+    "text": "Center administrators can view subscription status and platform invoices, submit payment information, schedule cancellation at period end, and resume a cancellation before the period ends.",
+    "sourceUrl": "lablink://specs/subscriptions/workflows.md;specs/subscriptions/frontend.md"
+  },
+  {
+    "id": "lablink-payment-options",
+    "title": "Subscription payment options",
+    "type": "feature",
+    "text": "LabLink’s platform-billing configuration supports payment methods such as bKash, Nagad, Rocket, bank transfer, and other administrator-configured options. Never claim a payment method is available until it is enabled in the live account.",
+    "sourceUrl": "lablink://specs/subscriptions/models.md"
+  },
+  {
+    "id": "lablink-payment-verification",
+    "title": "Subscription payment verification",
+    "type": "workflow",
+    "text": "For platform invoices, a center administrator can submit payment proof and a superadmin can verify or reject it. Verification marks the invoice paid and can activate the subscription.",
+    "sourceUrl": "lablink://specs/subscriptions/workflows.md;specs/subscriptions/superadmin.md"
+  },
+  {
+    "id": "lablink-staff-onboarding",
+    "title": "Staff and doctor onboarding",
+    "type": "feature",
+    "text": "Center administrators manage staff and doctor accounts. The notification system includes credentials emails for newly created staff and doctor accounts, subject to configured email delivery.",
+    "sourceUrl": "lablink://specs/center/registration.md;specs/notifications/email-sms.md"
+  },
+  {
+    "id": "lablink-center-settings",
+    "title": "Center settings",
+    "type": "feature",
+    "text": "Center administration includes settings for contact details, branding, paper preferences, online-appointment availability, and report-delivery notification switches. Use screenshots of settings only after removing real patient and account data.",
+    "sourceUrl": "lablink://specs/center/models.md;specs/center/settings.md;specs/center/spec.md"
+  },
+  {
+    "id": "lablink-notification-architecture",
+    "title": "Non-blocking notifications",
+    "type": "technical",
+    "text": "LabLink uses Celery-based background tasks for its preferred asynchronous email and SMS dispatch paths. This is an implementation detail suitable for technical or founder-facing content, not a promise of instant message delivery.",
+    "sourceUrl": "lablink://specs/notifications/email-sms.md"
+  },
+  {
+    "id": "lablink-account-notifications",
+    "title": "Account and appointment emails",
+    "type": "notification",
+    "text": "The notification system documents emails for patient welcome, password reset, staff-account approval, appointment booking, appointment confirmation, appointment cancellation, and selected subscription-billing events. Delivery depends on a usable recipient email and email configuration.",
+    "sourceUrl": "lablink://specs/notifications/email-sms.md"
+  },
+  {
+    "id": "lablink-audience-center-admin",
+    "title": "Audience: diagnostic-center administrators",
+    "type": "audience",
+    "text": "Center administrators are a key LabLink audience. Their relevant workflows include center setup, branding, staff access, analytics, subscription status, invoice visibility, and operational oversight.",
+    "sourceUrl": "lablink://specs/doc5-workflow-guide.md;specs/diagnostics/analytics.md;specs/subscriptions/workflows.md"
+  },
+  {
+    "id": "lablink-audience-reception",
+    "title": "Audience: reception and front-desk teams",
+    "type": "audience",
+    "text": "Reception and front-desk teams are relevant to patient intake, walk-in workflows, appointment scheduling, and payment recording. Use practical, time-saving language rather than claims of error elimination.",
+    "sourceUrl": "lablink://specs/doc5-workflow-guide.md;specs/appointments/workflows.md;specs/payments/invoices.md"
+  },
+  {
+    "id": "lablink-audience-lab-tech",
+    "title": "Audience: lab technicians",
+    "type": "audience",
+    "text": "Lab technicians are relevant to test-order queues, report creation and editing, report templates, report printing, report delivery, patient registration, and referring-doctor records.",
+    "sourceUrl": "lablink://specs/doc5-workflow-guide.md;specs/diagnostics/reports.md;specs/diagnostics/templates.md"
+  },
+  {
+    "id": "lablink-audience-doctor",
+    "title": "Audience: doctors",
+    "type": "audience",
+    "text": "Doctors are relevant to appointment consultations and diagnostic-order visibility. Documentation states that doctors can view test orders and conduct consultations; avoid claiming that they create or verify reports.",
+    "sourceUrl": "lablink://specs/doc5-workflow-guide.md;specs/appointments/workflows.md"
+  },
+  {
+    "id": "lablink-audience-patient",
+    "title": "Audience: patients",
+    "type": "audience",
+    "text": "Patient-facing capabilities include online appointment booking when enabled by the center, appointment emails when an email is available, and time-limited public report access. Patient marketing must be privacy-first and free of medical claims.",
+    "sourceUrl": "lablink://specs/appointments/workflows.md;specs/frontend/public-pages.md;specs/diagnostics/reports.md"
+  },
+  {
+    "id": "lablink-content-pillar-report-ready",
+    "title": "Content pillar: report-ready communication",
+    "type": "content-pillar",
+    "text": "Approved angle: show the journey from verified report to patient notification. Ground copy in the fact that email and SMS can be sent when enabled, and use a CTA such as 'Ask us how LabLink fits your center workflow.' Never promise a voice call or guaranteed delivery.",
+    "sourceUrl": "lablink://specs/notifications/email-sms.md;specs/diagnostics/reports.md"
+  },
+  {
+    "id": "lablink-content-pillar-report-workflow",
+    "title": "Content pillar: report workflow",
+    "type": "content-pillar",
+    "text": "Approved angle: show a draft-to-verified-to-delivered report workflow, report templates, and print-ready outputs. Use a product screenshot only after all patient names, dates of birth, phone numbers, report values, access tokens, and QR codes are removed or masked.",
+    "sourceUrl": "lablink://specs/diagnostics/reports.md;specs/diagnostics/templates.md"
+  },
+  {
+    "id": "lablink-content-pillar-operations",
+    "title": "Content pillar: center operations",
+    "type": "content-pillar",
+    "text": "Approved angle: connect patient intake, appointments, diagnostic orders, invoicing, and analytics into one operational story. Keep copy specific to documented workflows and avoid claiming that LabLink replaces clinical judgment.",
+    "sourceUrl": "lablink://SUMMARY.md;specs/doc5-workflow-guide.md;specs/diagnostics/analytics.md"
+  },
+  {
+    "id": "lablink-content-pillar-center-control",
+    "title": "Content pillar: center control",
+    "type": "content-pillar",
+    "text": "Approved angle: highlight center-specific branding, test availability and pricing, report templates, paper settings, and staff access. Do not claim that a setting is available to every role or every plan unless confirmed.",
+    "sourceUrl": "lablink://specs/center/models.md;specs/diagnostics/models.md;specs/diagnostics/templates.md"
+  },
+  {
+    "id": "lablink-marketing-safety",
+    "title": "Marketing safety rules for LabLink",
+    "type": "brand-rule",
+    "text": "Never use real patient data, medical results, report tokens, QR codes, phone numbers, email addresses, prescription details, or login credentials in marketing assets. Never make clinical, diagnostic-accuracy, privacy-certification, or guaranteed-delivery claims without explicit legal and product approval.",
+    "sourceUrl": "lablink://specs/diagnostics/models.md;specs/diagnostics/reports.md;specs/notifications/email-sms.md"
+  },
+  {
+    "id": "lablink-documentation-conflict-orders",
+    "title": "Claim hold: test-order creator roles",
+    "type": "claim-hold",
+    "text": "Do not state which role creates test orders in marketing. One workflow guide names receptionists and lab technicians, while the test-order API spec names doctor-only creation. Confirm the deployed permission model before creating role-specific copy.",
+    "sourceUrl": "lablink://specs/doc5-workflow-guide.md;specs/diagnostics/test-orders.md"
+  },
+  {
+    "id": "lablink-documentation-conflict-subdomains",
+    "title": "Claim hold: center subdomains",
+    "type": "claim-hold",
+    "text": "Do not advertise a center subdomain or white-label URL until deployment is confirmed. The public-pages spec documents subdomain routing, while the architecture overview says tenant resolution does not use subdomain routing.",
+    "sourceUrl": "lablink://specs/frontend/public-pages.md;specs/doc1-architecture-overview.md"
+  }
+]

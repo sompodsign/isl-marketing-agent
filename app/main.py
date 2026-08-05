@@ -7,15 +7,16 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.database import UPLOAD_DIR, connect, initialise
-from app.services import (generate_post, list_assets, list_knowledge, list_posts,
-                          publish_post, save_settings, settings_dict)
+from app.services import (create_and_publish_bangla_post, generate_post, list_assets,
+                          list_knowledge, list_posts, publish_post, save_settings,
+                          settings_dict)
 
 app = FastAPI(title="InariSoftLabs Marketing Agent", docs_url=None, redoc_url=None)
 security = HTTPBasic(auto_error=False)
@@ -43,12 +44,18 @@ class SettingsInput(BaseModel):
     mode: str = Field(default="approval")
     enabled: bool = False
     postingTimes: list[str] = []
+    contactCta: str = Field(default='', max_length=300)
 
 
 class DraftInput(BaseModel):
     assetIds: list[str] = []
     angle: str = Field(default="", max_length=500)
     visualContext: str = Field(default="", max_length=2000)
+
+
+class AssetMetadataInput(BaseModel):
+    label: str = Field(default='', max_length=120)
+    description: str = Field(default='', max_length=1000)
 
 
 @app.on_event("startup")
@@ -114,7 +121,11 @@ def add_knowledge(input: KnowledgeInput):
 
 
 @app.post("/api/assets", dependencies=[Depends(authenticate)], status_code=201)
-async def add_asset(file: UploadFile = File(...)):
+async def add_asset(
+    file: UploadFile = File(...),
+    label: str = Form(default=''),
+    description: str = Form(default=''),
+):
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(400, "Upload a JPG, PNG, WebP, GIF, MP4, or MOV file.")
     content = await file.read()
@@ -123,8 +134,24 @@ async def add_asset(file: UploadFile = File(...)):
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "-", file.filename or "asset")
     asset_id = str(uuid4()); file_path = UPLOAD_DIR / f"{asset_id}-{safe_name}"; file_path.write_bytes(content)
     created = datetime.utcnow().isoformat()
-    with connect() as db: db.execute("INSERT INTO assets VALUES (?, ?, ?, ?, ?)", (asset_id, safe_name, file.content_type, str(file_path), created))
-    return {"id": asset_id, "originalName": safe_name, "mimeType": file.content_type, "createdAt": created}
+    with connect() as db:
+        db.execute(
+            "INSERT INTO assets VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (asset_id, safe_name, file.content_type, str(file_path), label.strip(), description.strip(), created),
+        )
+    return {"id": asset_id, "originalName": safe_name, "mimeType": file.content_type, "label": label.strip(), "description": description.strip(), "createdAt": created}
+
+
+@app.patch("/api/assets/{asset_id}", dependencies=[Depends(authenticate)])
+def update_asset(asset_id: str, input: AssetMetadataInput):
+    with connect() as db:
+        updated = db.execute(
+            "UPDATE assets SET label=?, description=? WHERE id=?",
+            (input.label.strip(), input.description.strip(), asset_id),
+        ).rowcount
+    if not updated:
+        raise HTTPException(404, 'Asset not found.')
+    return {"id": asset_id, "label": input.label.strip(), "description": input.description.strip()}
 
 
 @app.post("/api/posts/generate", dependencies=[Depends(authenticate)], status_code=201)
@@ -137,6 +164,17 @@ async def make_draft(input: DraftInput):
 def send_post(post_id: str):
     try: return publish_post(post_id)
     except ValueError as error: raise HTTPException(400, str(error)) from error
+
+
+@app.post("/api/posts/publish-now", dependencies=[Depends(authenticate)])
+async def publish_now(request: Request):
+    try:
+        post = await create_and_publish_bangla_post()
+        if "text/html" in request.headers.get("accept", ""):
+            return RedirectResponse(url="/", status_code=303)
+        return post
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
 
 
 @app.post("/api/scheduler/run", dependencies=[Depends(authenticate)])
@@ -152,4 +190,8 @@ def home(): return FileResponse(PUBLIC_DIR / "index.html")
 def static(file_name: str):
     candidate = PUBLIC_DIR / file_name
     if candidate.name != file_name or not candidate.exists(): raise HTTPException(404)
-    return FileResponse(candidate, media_type=mimetypes.guess_type(candidate.name)[0])
+    return FileResponse(
+        candidate,
+        media_type=mimetypes.guess_type(candidate.name)[0],
+        headers={"Cache-Control": "no-store"},
+    )

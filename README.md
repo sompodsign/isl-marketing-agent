@@ -28,6 +28,20 @@ Open `http://localhost:8000`. Set `DASHBOARD_PASSWORD` before exposing it to the
 
 `python scripts/import_site.py https://inarisoftlabs.com` imports public site text as one reviewable knowledge entry. Use it as a starting point, not as permission to publish unreviewed claims.
 
+### Product knowledge packs
+
+Version-controlled knowledge packs let you ground marketing copy in a product's
+actual specifications. Import the LabLink pack with:
+
+```bash
+python3 scripts/import_knowledge_pack.py knowledge/lablink.json
+```
+
+The importer is safe to repeat: it updates only records with the pack's stable
+IDs and keeps dashboard entries you added manually. The LabLink pack includes
+explicit claim-hold rules for undocumented voice calls and conflicting product
+specifications, so those are not accidentally turned into marketing claims.
+
 ## Safeguards
 
 - Drafts only use knowledge currently stored in the library and ask the model not to invent claims.
