@@ -1,0 +1,5 @@
+.env
+data/state.json
+data/uploads/
+data/marketing-agent.db
+.DS_Store

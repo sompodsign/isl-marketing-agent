@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InariSoftLabs · Marketing Agent</title><link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header><div><p class="eyebrow">INARISOFTLABS</p><h1>Your marketing desk,<br><em>always ready.</em></h1></div><div id="status" class="status">Loading…</div></header>
+    <section class="intro"><p>Ground every post in verified business facts. Bring screenshots, choose a point of view, and publish only when it feels right.</p><p class="note">Automatic publishing is off by default.</p></section>
+    <div class="grid">
+      <section class="card wide"><div class="section-head"><div><p class="eyebrow">01 · KNOWLEDGE</p><h2>What should the agent know?</h2></div><span id="knowledge-count" class="count"></span></div>
+        <form id="knowledge-form"><input name="title" placeholder="e.g. Campus workflow product" required><select name="type"><option value="product">Product / service</option><option value="audience">Audience</option><option value="case-study">Case study</option><option value="brand">Brand guidance</option></select><textarea name="text" placeholder="Add verified facts: what it does, who it is for, outcomes you can substantiate, and the right call to action." required></textarea><button>Add verified knowledge</button></form>
+        <div id="knowledge-list" class="fact-list"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">02 · VISUALS</p><h2>Your product in action</h2></div></div>
+        <label class="dropzone"><input id="asset-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime" multiple><span>Drop screenshots or short product videos here</span><small>JPG, PNG, WebP, GIF, MP4, or MOV · 8 MB each</small></label>
+        <div id="assets" class="asset-list"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">03 · CADENCE</p><h2>Posting rhythm</h2></div></div>
+        <form id="settings-form"><label>Posts each day<select name="postsPerDay"><option value="1">Once daily</option><option value="2">Twice daily</option><option value="3">Three times daily</option></select></label><label>Time zone<input name="timezone" value="Asia/Dhaka"></label><label>Publish mode<select name="mode"><option value="approval">Review every draft</option><option value="auto_publish">Publish automatically</option></select></label><label class="toggle"><input type="checkbox" name="enabled"> Enable the schedule</label><div id="times" class="times"></div><button>Save cadence</button></form>
+      </section>
+      <section class="card wide composer"><div class="section-head"><div><p class="eyebrow">04 · CREATE</p><h2>Make a draft</h2></div><span id="integration-state"></span></div>
+        <form id="draft-form"><input name="angle" placeholder="Optional angle — e.g. show how the team solves a daily friction point"><textarea name="visualContext" placeholder="Describe what the selected screenshot/video visibly shows. DeepSeek is text-only, so this prevents it from guessing visual details."></textarea><div id="asset-picker" class="asset-picker"></div><button class="primary">Create Facebook draft</button></form>
+        <div id="posts" class="posts"></div>
+      </section>
+    </div>
+  </main><div id="toast" class="toast" role="status"></div><script src="app.js"></script>
+</body></html>
