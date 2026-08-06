@@ -8,6 +8,8 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class Settings:
+    environment: str = os.getenv("APP_ENV", "development")
+    run_scheduler: bool = os.getenv("ENABLE_INTERNAL_SCHEDULER", "true").lower() == "true"
     dashboard_password: str = os.getenv("DASHBOARD_PASSWORD", "")
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash-0731")
@@ -18,6 +20,10 @@ class Settings:
     @property
     def facebook_ready(self) -> bool:
         return bool(self.facebook_page_id and self.facebook_token and "XX" not in self.facebook_version)
+
+    @property
+    def production(self) -> bool:
+        return self.environment.lower() == "production"
 
 
 settings = Settings()

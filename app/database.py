@@ -1,17 +1,22 @@
+import os
 import sqlite3
 from pathlib import Path
 
-DATA_DIR = Path("data")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = Path(os.getenv("MARKETING_AGENT_DATA_DIR", PROJECT_ROOT / "data")).resolve()
 DATABASE_PATH = DATA_DIR / "marketing-agent.db"
 UPLOAD_DIR = DATA_DIR / "uploads"
 
 
 def connect() -> sqlite3.Connection:
-    DATA_DIR.mkdir(exist_ok=True)
-    UPLOAD_DIR.mkdir(exist_ok=True)
-    db = sqlite3.connect(DATABASE_PATH)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(DATABASE_PATH, timeout=10)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
+    db.execute("PRAGMA busy_timeout = 10000")
+    db.execute("PRAGMA journal_mode = WAL")
+    db.execute("PRAGMA recursive_triggers = ON")
     return db
 
 
@@ -21,7 +26,8 @@ def initialise() -> None:
             """
             CREATE TABLE IF NOT EXISTS knowledge (
               id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
-              kind TEXT NOT NULL, source_url TEXT, created_at TEXT NOT NULL
+              kind TEXT NOT NULL, source_url TEXT, created_at TEXT NOT NULL,
+              reviewed INTEGER NOT NULL DEFAULT 1
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_search USING fts5(
               title, body, content='knowledge', content_rowid='rowid'
@@ -53,19 +59,45 @@ def initialise() -> None:
             CREATE TABLE IF NOT EXISTS schedule_runs (slot TEXT PRIMARY KEY, run_at TEXT NOT NULL);
             """
         )
+        knowledge_columns = {row["name"] for row in db.execute("PRAGMA table_info(knowledge)")}
+        if "reviewed" not in knowledge_columns:
+            db.execute("ALTER TABLE knowledge ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 1")
         if not db.execute("SELECT 1 FROM knowledge LIMIT 1").fetchone():
             db.execute(
-                "INSERT INTO knowledge VALUES (?, ?, ?, ?, ?, datetime('now'))",
-                ("brand-basics", "InariSoftLabs brand basics", "Company name: InariSoftLabs. Website: https://inarisoftlabs.com. Only make claims supported by the knowledge library. Add verified products, audiences, differentiators, case studies, and calls to action before enabling automatic publishing.", "brand", "https://inarisoftlabs.com"),
+                "INSERT INTO knowledge(id, title, body, kind, source_url, created_at, reviewed) VALUES (?, ?, ?, ?, ?, datetime('now'), 1)",
+                (
+                    "brand-basics",
+                    "InariSoftLabs brand basics",
+                    "Company name: InariSoftLabs. Website: https://inarisoftlabs.com. Only make claims supported by the knowledge library. Add verified products, audiences, differentiators, case studies, and calls to action before enabling automatic publishing.",
+                    "brand",
+                    "https://inarisoftlabs.com",
+                ),
             )
-        defaults = {"posts_per_day": "1", "timezone": "Asia/Dhaka", "mode": "approval", "enabled": "false", "posting_times": '["10:00"]'}
+        defaults = {
+            "posts_per_day": "1",
+            "timezone": "Asia/Dhaka",
+            "mode": "approval",
+            "enabled": "false",
+            "posting_times": '["10:00"]',
+            "writing_examples": "",
+        }
         for key, value in defaults.items():
             db.execute("INSERT OR IGNORE INTO settings VALUES (?, ?)", (key, value))
-        asset_columns = {row['name'] for row in db.execute('PRAGMA table_info(assets)')}
-        if 'label' not in asset_columns:
+        asset_columns = {row["name"] for row in db.execute("PRAGMA table_info(assets)")}
+        if "label" not in asset_columns:
             db.execute("ALTER TABLE assets ADD COLUMN label TEXT NOT NULL DEFAULT ''")
-        if 'description' not in asset_columns:
+        if "description" not in asset_columns:
             db.execute("ALTER TABLE assets ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+        post_columns = {row["name"] for row in db.execute("PRAGMA table_info(posts)")}
+        if "updated_at" not in post_columns:
+            db.execute("ALTER TABLE posts ADD COLUMN updated_at TEXT")
+        schedule_columns = {row["name"] for row in db.execute("PRAGMA table_info(schedule_runs)")}
+        if "status" not in schedule_columns:
+            db.execute("ALTER TABLE schedule_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'succeeded'")
+        if "error" not in schedule_columns:
+            db.execute("ALTER TABLE schedule_runs ADD COLUMN error TEXT")
+        db.execute("CREATE INDEX IF NOT EXISTS posts_status_created ON posts(status, created_at)")
+        db.execute("CREATE INDEX IF NOT EXISTS posts_scheduled_for ON posts(scheduled_for)")
 
 
 def rows(query: str, parameters: tuple = ()) -> list[dict]:

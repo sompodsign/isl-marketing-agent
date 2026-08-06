@@ -26,6 +26,18 @@ Open `http://localhost:8000`. Set `DASHBOARD_PASSWORD` before exposing it to the
 4. Add Facebook Page settings to `.env`: Page ID, Page access token, and the Meta Graph API version enabled in your Meta app.
 5. Start in **Review every draft** mode. Once you trust the outputs, choose a 1×, 2×, or 3× daily cadence and explicitly enable automatic publishing.
 
+### Make the writing sound like you
+
+The cadence form accepts one or two optional **Human writing examples**. Paste posts
+whose rhythm, restraint, and vocabulary feel right for InariSoftLabs. Examples guide
+voice only: product claims still have to come from approved knowledge records. When
+the field is blank, the agent uses a built-in owner-style example in the requested
+language and avoids common AI marketing clichés.
+
+Generated drafts remain editable before publication. Each draft shows the knowledge
+records it cited, and publishing requires confirmation. Website imports are marked
+unreviewed and cannot reach the writing model until you approve them in the dashboard.
+
 `python scripts/import_site.py https://inarisoftlabs.com` imports public site text as one reviewable knowledge entry. Use it as a starting point, not as permission to publish unreviewed claims.
 
 ### Product knowledge packs
@@ -54,3 +66,37 @@ specifications, so those are not accidentally turned into marketing claims.
 ## Production notes
 
 The built-in scheduler runs while the web process is alive. For reliable production delivery, run the app as a persistent service (for example, Docker/Cloud Run with an always-on worker, a VM, or a separate scheduled call to `/api/scheduler/run`). Back up `data/marketing-agent.db` and `data/uploads/` regularly.
+
+Set `APP_ENV=production` in production. The application then refuses to start without
+`DASHBOARD_PASSWORD`. The health check is available at `/healthz`. Set
+`MARKETING_AGENT_DATA_DIR` if the SQLite database and uploads should live outside the
+repository directory.
+
+Only one process should run the built-in scheduler. Set
+`ENABLE_INTERNAL_SCHEDULER=false` on additional web workers and trigger
+`POST /api/scheduler/run` from one authenticated worker or an external scheduler.
+
+## Development checks
+
+```bash
+python3 -m pip install -r requirements.txt -r requirements-dev.txt
+ruff check app scripts tests run.py
+ruff format --check app scripts tests run.py
+pytest -q
+node --check public/app.js
+```
+
+GitHub Actions runs the Python lint, formatting, and test checks on pushes and pull
+requests.
+
+## Deploy
+
+The production deployment uses Docker Compose and preserves `data/` on the server.
+
+```bash
+./deploy.sh
+```
+
+It deploys to `/home/shampad/projects/isl-marketing-agent` on `192.168.0.131`
+and publishes the dashboard on port `8020`. Use `./deploy.sh --help` to override
+the host, remote path, or port.
