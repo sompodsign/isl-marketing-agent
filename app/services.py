@@ -4,6 +4,7 @@ import logging
 import random
 import re
 import sqlite3
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -41,6 +42,20 @@ It is a small workflow detail, but it can make the day feel much more organized.
 Message us if you want to see how the workflow fits your center.
 
 #DiagnosticCenter #LabWorkflow #LabLink""",
+}
+
+PRODUCT_WRITING_EXAMPLES = {
+    "KarbarPro": """বিকেলের ভিড়ের আগে কার কাছে কত বাকি আছে, একবার দেখে নেওয়া দরকার।
+
+বিক্রি হয়েছে, কিন্তু সব টাকা একদিনে আসে না। খাতা বা পুরোনো হিসাব ঘেঁটে বাকি খুঁজতে গেলে কাজের ফাঁকে সময় চলে যায়। KarbarPro-তে কাস্টমারের বকেয়া এক জায়গায় দেখা যায়।
+
+তাই দোকানে ব্যস্ততা থাকলেও কার সঙ্গে কথা বলা দরকার, সেটা বুঝতে সুবিধা হয়। হিসাবটা সামনে থাকলে কালেকশনের কাজও গুছিয়ে এগোয়।
+
+✅ বকেয়ার হিসাব চোখের সামনে থাকলে দিনের কাজটা একটু সহজ হয়।
+
+আপনার দোকানের বিক্রি, স্টক ও হিসাব কীভাবে এক জায়গায় রাখবেন, জানতে ইনবক্সে কথা বলুন।
+
+#দোকানেরহিসাব #বকেয়াহিসাব #কারবারপ্রো""",
 }
 
 
@@ -114,7 +129,7 @@ def save_settings(value: dict) -> dict:
 
 def list_knowledge() -> list[dict]:
     records = rows(
-        "SELECT id, title, body AS text, kind AS type, source_url AS sourceUrl, created_at AS createdAt, reviewed FROM knowledge ORDER BY created_at DESC"
+        "SELECT id, title, body AS text, kind AS type, source_url AS sourceUrl, created_at AS createdAt, reviewed, product FROM knowledge ORDER BY product, created_at DESC"
     )
     for record in records:
         record["reviewed"] = bool(record["reviewed"])
@@ -128,7 +143,7 @@ def retrieve_knowledge(query: str, limit: int = 7) -> list[dict]:
         fts_query = " OR ".join(f'"{term}"' for term in terms[:25])
         try:
             result = rows(
-                "SELECT k.id, k.title, k.body AS text, k.kind AS type FROM knowledge_search s JOIN knowledge k ON k.rowid=s.rowid WHERE knowledge_search MATCH ? AND k.reviewed=1 ORDER BY bm25(knowledge_search) LIMIT ?",
+                "SELECT k.id, k.title, k.body AS text, k.kind AS type, k.product FROM knowledge_search s JOIN knowledge k ON k.rowid=s.rowid WHERE knowledge_search MATCH ? AND k.reviewed=1 ORDER BY bm25(knowledge_search) LIMIT ?",
                 (fts_query, limit),
             )
             if result:
@@ -136,7 +151,7 @@ def retrieve_knowledge(query: str, limit: int = 7) -> list[dict]:
         except sqlite3.OperationalError:
             pass
     return rows(
-        "SELECT id, title, body AS text, kind AS type FROM knowledge WHERE reviewed=1 ORDER BY created_at DESC LIMIT ?",
+        "SELECT id, title, body AS text, kind AS type, product FROM knowledge WHERE reviewed=1 ORDER BY created_at DESC LIMIT ?",
         (limit,),
     )
 
@@ -191,7 +206,7 @@ def product_knowledge(product: str, angle: str) -> list[dict]:
     return [
         fact
         for fact in facts
-        if product_key in re.sub(r"[^a-z0-9]", "", f"{fact['title']} {fact['text']}".lower())
+        if fact.get("product") in {"", product}
     ]
 
 
@@ -241,15 +256,128 @@ def jaccard(first: str, second: str) -> float:
     return len(one & two) / max(len(one | two), 1)
 
 
+async def writer_output(prompt: str) -> object:
+    """Prefer OpenAI, then Gemini, with DeepSeek retained as transition fallback."""
+    openai_key = getattr(settings, "openai_api_key", "")
+    if openai_key:
+        schema = {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "caption": {"type": "string"}, "headline": {"type": "string"},
+                "cta": {"type": "string"}, "hashtags": {"type": "array", "items": {"type": "string"}},
+                "imageNotes": {"type": "string"}, "selectedAssetId": {"type": "string"},
+                "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                "factIds": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["caption", "headline", "cta", "hashtags", "imageNotes", "selectedAssetId", "confidence", "factIds"],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    "https://api.openai.com/v1/responses",
+                    headers={"Authorization": f"Bearer {openai_key}"},
+                    json={
+                        "model": settings.openai_model,
+                        "instructions": "Act as the public-facing owner of InariSoftLabs. Return only the requested final JSON. Never expose planning or reasoning.",
+                        "input": prompt,
+                        "text": {"format": {"type": "json_schema", "name": "marketing_post", "strict": True, "schema": schema}},
+                        "reasoning": {"effort": settings.openai_reasoning_effort},
+                        "max_output_tokens": 1200,
+                    },
+                )
+        except httpx.RequestError as error:
+            raise ValueError("Could not reach OpenAI. Check the network connection and try again.") from error
+        if response.status_code >= 400:
+            logger.warning("OpenAI request failed with HTTP %s", response.status_code)
+            raise ValueError("OpenAI rejected the writing request. Check the server logs and configuration.")
+        try:
+            result = response.json()
+            if result.get("output_text"):
+                return result["output_text"]
+            return "\n".join(
+                part.get("text", "")
+                for output in result["output"]
+                for part in output.get("content", [])
+                if part.get("type") == "output_text"
+            )
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
+            raise ValueError("OpenAI returned an unexpected response. Please try again.") from error
+
+    gemini_key = getattr(settings, "gemini_api_key", "")
+    if gemini_key:
+        schema = {
+            "type": "object",
+            "properties": {
+                "caption": {"type": "string"}, "headline": {"type": "string"},
+                "cta": {"type": "string"}, "hashtags": {"type": "array", "items": {"type": "string"}},
+                "imageNotes": {"type": "string"}, "selectedAssetId": {"type": "string"},
+                "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                "factIds": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["caption", "headline", "cta", "hashtags", "imageNotes", "selectedAssetId", "confidence", "factIds"],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                response = await client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent",
+                    headers={"x-goog-api-key": gemini_key},
+                    json={
+                        "systemInstruction": {"parts": [{"text": "Act as the public-facing owner of InariSoftLabs. Return only the requested final JSON. Never expose planning or reasoning."}]},
+                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                        "generationConfig": {"responseMimeType": "application/json", "responseSchema": schema, "temperature": 0.35, "maxOutputTokens": 1200},
+                    },
+                )
+        except httpx.RequestError as error:
+            raise ValueError("Could not reach Gemini. Check the network connection and try again.") from error
+        if response.status_code >= 400:
+            try:
+                api_message = response.json().get("error", {}).get("message", "")
+            except (ValueError, TypeError):
+                api_message = ""
+            logger.warning("Gemini request failed with HTTP %s: %s", response.status_code, api_message[:500])
+            if response.status_code == 429:
+                raise ValueError("Gemini quota limit was reached. Enable billing for this Google AI Studio project or wait for its quota reset, then try again.")
+            raise ValueError("Gemini rejected the writing request. Check the server logs and configuration.")
+        try:
+            parts = response.json()["candidates"][0]["content"]["parts"]
+            return "\n".join(part.get("text", "") for part in parts if isinstance(part, dict))
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
+            raise ValueError("Gemini returned an unexpected response. Please try again.") from error
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+                json={
+                    "model": settings.deepseek_model,
+                    "messages": [
+                        {"role": "system", "content": "Act as the public-facing owner of InariSoftLabs. Return only the requested final JSON. Never expose planning or reasoning."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "response_format": {"type": "json_object"}, "thinking": {"type": "disabled"}, "max_tokens": 1200,
+                },
+            )
+    except httpx.RequestError as error:
+        raise ValueError("Could not reach DeepSeek. Check the network connection and try again.") from error
+    if response.status_code >= 400:
+        logger.warning("DeepSeek request failed with HTTP %s", response.status_code)
+        raise ValueError("The writing service rejected the request. Check the server logs and configuration.")
+    try:
+        return response.json()["choices"][0]["message"].get("content")
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
+        raise ValueError("DeepSeek returned an unexpected response. Please try again.") from error
+
+
 async def generate_post(
     asset_ids: list[str],
     angle: str,
     visual_context: str = "",
-    language: str = "en",
+    language: str = "bn",
     image_options: list[dict] | None = None,
 ) -> dict:
-    if not settings.deepseek_api_key:
-        raise ValueError("Add DEEPSEEK_API_KEY to .env before generating a post.")
+    if not (getattr(settings, "openai_api_key", "") or getattr(settings, "gemini_api_key", "") or getattr(settings, "deepseek_api_key", "")):
+        raise ValueError("Add OPENAI_API_KEY to .env before generating a post.")
     if not usable_knowledge():
         raise ValueError("Add a verified product, service, audience, or case-study note before generating posts.")
     selected_assets = asset_records(asset_ids)
@@ -276,7 +404,7 @@ async def generate_post(
     current_settings = settings_dict()
     contact_cta = current_settings["contactCta"].strip()
     custom_examples = current_settings["writingExamples"].strip()
-    writing_example = custom_examples or HUMAN_WRITING_EXAMPLES[language]
+    writing_example = custom_examples or PRODUCT_WRITING_EXAMPLES.get(product, HUMAN_WRITING_EXAMPLES[language])
     language_instruction = (
         "Write the caption, CTA, headline, image notes, and hashtags entirely in "
         "fluent, natural Bangladeshi Bangla using Bangla script. Write like a "
@@ -290,7 +418,7 @@ async def generate_post(
         else "Write the caption, CTA, headline, image notes, and hashtags in clear English."
     )
     contact_instruction = (
-        f"Use this exact optional contact CTA once, naturally at the end: {contact_cta}"
+        f"Place this exact contact block on its own lines, separated from the preceding text by exactly one blank line. Do not rewrite, shorten, merge, or repeat it:\n{contact_cta}"
         if contact_cta
         else "Use a soft CTA such as asking readers to message the Page or learn more."
     )
@@ -314,6 +442,7 @@ HUMAN WRITING RULES:
 - Use “আপনি/আপনার” consistently. Avoid overly stiff verbs and nouns, including “করিয়া”, “উপর্যুক্ত”, “সংশ্লিষ্ট”, “প্রয়োজনীয়তা”, “বাস্তবায়ন”, and “প্রতীয়মান”. Do not imitate West Bengal or Hindi-influenced Bangla.
 - Do not force slang, jokes, emojis, exclamation marks, questions, or sales pressure. One ✅ benefit line is enough. Never use more than one emoji.
 - Keep it concrete: one situation, one workflow, and one practical benefit. Do not repeat the same benefit in different words.
+- Never invent a time of day, opening or closing routine, customer behaviour, location, or work schedule. Only mention those details when they appear in verified knowledge or the reviewed visual description.
 - Before returning, silently read the Bangla as a Facebook Page owner in Bangladesh would say it aloud. Rewrite any sentence that sounds translated, academic, generic, or overly promotional.
 - Do not copy the example's facts or phrases. Learn only its natural rhythm, restraint, and structure.
 
@@ -346,36 +475,7 @@ Use this exact visible structure inside the caption field:
 The caption field must contain the complete final Facebook post, including the CTA and hashtags exactly as it should be published. Do not add headings such as “ক্যাপশন”, “হ্যাশট্যাগ”, or “কল টু অ্যাকশন”.
 
 Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay text","cta":"Bangla CTA already included in caption","hashtags":["Bangla hashtags already included in caption"],"imageNotes":"Bangla description of how selected imagery supports the copy","selectedAssetId":"image ID or empty string","confidence":"high|medium|low","factIds":["verified ids used"]}}. Caption must be 80-220 words and use no more than 5 hashtags."""
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                "https://api.deepseek.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
-                json={
-                    "model": settings.deepseek_model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "Act as the public-facing owner of InariSoftLabs. Return only the requested final JSON. Never expose planning or reasoning.",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    "response_format": {"type": "json_object"},
-                    "thinking": {"type": "disabled"},
-                    "max_tokens": 1200,
-                },
-            )
-    except httpx.RequestError as error:
-        raise ValueError("Could not reach DeepSeek. Check the network connection and try again.") from error
-    if response.status_code >= 400:
-        logger.warning("DeepSeek request failed with HTTP %s", response.status_code)
-        raise ValueError("The writing service rejected the request. Check the server logs and configuration.")
-    try:
-        message = response.json()["choices"][0]["message"]
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
-        raise ValueError("DeepSeek returned an unexpected response. Please try again.") from error
-    # reasoning_content is internal model deliberation, never publish it.
-    model_output = message.get("content")
+    model_output = await writer_output(prompt)
     try:
         brief = parse_json(model_output)
     except ValueError as error:
@@ -400,6 +500,15 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
     brief["caption"] = re.sub(
         r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", OFFICIAL_CONTACT_EMAIL, brief["caption"], flags=re.IGNORECASE
     )
+    # Keep the contact block visually separate even when the writing model collapses line breaks.
+    if contact_cta:
+        contact_position = brief["caption"].rfind(contact_cta)
+        if contact_position >= 0:
+            before_contact = brief["caption"][:contact_position].rstrip()
+            after_contact = brief["caption"][contact_position + len(contact_cta) :]
+            brief["caption"] = (
+                f"{before_contact}\n\n{contact_cta}{after_contact}" if before_contact else f"{contact_cta}{after_contact}"
+            )
     banned_phrases = ("revolutionize", "game-changer", "seamless solution", "in today's fast-paced world")
     if any(phrase in brief["caption"].lower() for phrase in banned_phrases):
         raise ValueError("The generated caption sounds too generic. Please try again.")
@@ -530,6 +639,26 @@ def _facebook_multipart(url: str, fields: dict, file_path: str, mime_type: str, 
         return json.loads(response.read())
 
 
+def _facebook_error_details(error: Exception) -> dict:
+    """Extract Graph API error details without exposing access tokens in logs."""
+    details = {"exception": type(error).__name__}
+    if not isinstance(error, urllib.error.HTTPError):
+        return details
+    details["httpStatus"] = error.code
+    try:
+        payload = json.loads(error.read().decode("utf-8", errors="replace"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return details
+    graph_error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(graph_error, dict):
+        return details
+    for source, target in (("code", "graphCode"), ("error_subcode", "graphSubcode"), ("type", "graphType"), ("message", "graphMessage")):
+        value = graph_error.get(source)
+        if value is not None:
+            details[target] = str(value)[:500]
+    return details
+
+
 def publish_post(post_id: str) -> dict:
     if not settings.facebook_ready:
         raise ValueError("Facebook is not configured. Set Page ID, Page token, and Graph API version in .env.")
@@ -582,12 +711,13 @@ def publish_post(post_id: str) -> dict:
             )
         log_post_event(post_id, "published", "Facebook accepted the post.", details={"facebookPostId": result.get("id")})
     except Exception as error:
-        logger.exception("Facebook publishing failed for post %s", post_id)
+        error_details = _facebook_error_details(error)
+        logger.exception("Facebook publishing failed for post %s: %s", post_id, error_details)
         public_error = "Facebook rejected or could not complete the request. Check the server logs."
         with connect() as db:
                 db.execute(
                 "UPDATE posts SET status='failed', error=?, updated_at=? WHERE id=?", (public_error, now(), post_id)
             )
-        log_post_event(post_id, "publishing_failed", public_error, "error", {"exception": type(error).__name__})
+        log_post_event(post_id, "publishing_failed", public_error, "error", error_details)
         raise ValueError(public_error) from error
     return next(item for item in list_posts() if item["id"] == post_id)

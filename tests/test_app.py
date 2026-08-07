@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from app import database, main, services
@@ -62,6 +62,14 @@ def test_settings_reject_invalid_timezone_and_time(isolated_data):
         response = client.post("/api/settings", json=payload)
         assert response.status_code == 400
         assert "24-hour" in response.json()["detail"]
+
+
+def test_scheduler_runs_a_slot_crossed_between_ten_minute_checks():
+    config = {"timezone": "Asia/Dhaka", "postingTimes": ["10:00"]}
+    checked_after = datetime(2026, 8, 8, 3, 59, tzinfo=timezone.utc)
+    checked_at = datetime(2026, 8, 8, 4, 5, tzinfo=timezone.utc)
+
+    assert main.due_schedule_slots(config, checked_after, checked_at) == ["2026-08-08-10:00"]
 
 
 def test_upload_checks_file_signature(isolated_data):
@@ -176,6 +184,7 @@ def test_generation_uses_human_example_and_validates_facts(isolated_data, monkey
     assert "A calm owner-style example." in prompt
     assert "everyday, educated voice commonly used by Bangladesh-based businesses" in prompt
     assert "silently read the Bangla" in prompt
+    assert "Never invent a time of day" in prompt
     assert post["factIds"] == ["fact-1"]
 
 
@@ -195,6 +204,33 @@ def test_selected_product_is_read_from_imported_asset_label():
 
 def test_selected_product_uses_explicit_asset_assignment():
     assert services.selected_product([{"product": "KarbarPro", "label": "Any screenshot"}]) == "KarbarPro"
+
+
+def test_karbarpro_has_its_own_writing_example(isolated_data, monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"caption":"একটি স্বাভাবিক ক্যাপশন।", "headline":"", "cta":"", "hashtags":[], "imageNotes":"", "selectedAssetId":"", "confidence":"high", "factIds":[]}'}}]}
+
+    class FakeClient:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return None
+        async def post(self, url, **kwargs): captured.update(kwargs["json"]); return FakeResponse()
+
+    monkeypatch.setattr(services.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(services, "settings", SimpleNamespace(deepseek_api_key="key", deepseek_model="model"))
+    monkeypatch.setattr(services, "usable_knowledge", lambda: True)
+    monkeypatch.setattr(services, "product_knowledge", lambda product, angle: [{"id":"karbarpro-test", "title":"KarbarPro fact", "text":"A verified KarbarPro fact.", "type":"product"}])
+    with pytest.raises(ValueError, match="between 80 and 220 words"):
+        asyncio.run(services.generate_post([], "", image_options=[{"product":"KarbarPro", "id":"image-1", "label":"KarbarPro — Customer Dues", "description":"Dues screen"}]))
+    assert "বিকেলের ভিড়ের আগে কার কাছে কত বাকি আছে" in captured["messages"][1]["content"]
 
 
 def test_selected_product_rejects_mixed_product_assets():

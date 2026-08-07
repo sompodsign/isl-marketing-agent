@@ -22,7 +22,7 @@ Open `http://localhost:8000`. Set `DASHBOARD_PASSWORD` before exposing it to the
 
 1. Add verified information in **Knowledge**—products, ideal customers, supported outcomes, case studies, and calls to action.
 2. Upload product screenshots or videos. Select these assets for the final Facebook post. DeepSeek's current API models are text-only, so describe the visible workflow in the **Visual context** box; this stops the writer guessing visual details. For videos, a representative screenshot is still useful for review and creative direction.
-3. Set `DEEPSEEK_API_KEY` to enable draft creation. `deepseek-v4-flash-0731` is the default writing model; change `DEEPSEEK_MODEL` if you prefer another available DeepSeek model.
+3. Set `OPENAI_API_KEY` to enable OpenAI for draft creation. The default is `gpt-5.6-luna` with low reasoning effort, tuned for cost-sensitive post generation. OpenAI is preferred when configured, followed by Gemini and then DeepSeek as transition fallbacks. Screenshots are not sent to any writing model—only their reviewed labels and descriptions are used.
 4. Add Facebook Page settings to `.env`: Page ID, Page access token, and the Meta Graph API version enabled in your Meta app.
 5. Start in **Review every draft** mode. Once you trust the outputs, choose a 1×, 2×, or 3× daily cadence and explicitly enable automatic publishing.
 

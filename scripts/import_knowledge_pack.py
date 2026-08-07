@@ -30,13 +30,15 @@ def main() -> None:
 
     initialise()
     timestamp = datetime.now(timezone.utc).isoformat()
+    pack_products = {"lablink": "LabLink", "karbarpro": "KarbarPro", "shikha": "Shikha"}
+    pack_product = pack_products.get(pack_path.stem.lower(), "")
     with connect() as db:
         for record in records:
             db.execute(
                 """
                 INSERT OR REPLACE INTO knowledge
-                (id, title, body, kind, source_url, created_at, reviewed)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
+                (id, title, body, kind, source_url, created_at, reviewed, product)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
                 """,
                 (
                     record["id"],
@@ -45,6 +47,7 @@ def main() -> None:
                     record["type"],
                     record["sourceUrl"],
                     timestamp,
+                    record.get("product", pack_product),
                 ),
             )
     print(f"Imported {len(records)} knowledge records from {pack_path}.")

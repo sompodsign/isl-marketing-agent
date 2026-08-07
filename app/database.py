@@ -27,7 +27,7 @@ def initialise() -> None:
             CREATE TABLE IF NOT EXISTS knowledge (
               id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
               kind TEXT NOT NULL, source_url TEXT, created_at TEXT NOT NULL,
-              reviewed INTEGER NOT NULL DEFAULT 1
+              reviewed INTEGER NOT NULL DEFAULT 1, product TEXT NOT NULL DEFAULT ''
             );
             CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_search USING fts5(
               title, body, content='knowledge', content_rowid='rowid'
@@ -68,6 +68,10 @@ def initialise() -> None:
         knowledge_columns = {row["name"] for row in db.execute("PRAGMA table_info(knowledge)")}
         if "reviewed" not in knowledge_columns:
             db.execute("ALTER TABLE knowledge ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 1")
+        if "product" not in knowledge_columns:
+            db.execute("ALTER TABLE knowledge ADD COLUMN product TEXT NOT NULL DEFAULT ''")
+        db.execute("UPDATE knowledge SET product='LabLink' WHERE product='' AND lower(title || ' ' || body) LIKE '%lablink%'")
+        db.execute("UPDATE knowledge SET product='KarbarPro' WHERE product='' AND lower(title || ' ' || body) LIKE '%karbarpro%'")
         if not db.execute("SELECT 1 FROM knowledge LIMIT 1").fetchone():
             db.execute(
                 "INSERT INTO knowledge(id, title, body, kind, source_url, created_at, reviewed) VALUES (?, ?, ?, ?, ?, datetime('now'), 1)",

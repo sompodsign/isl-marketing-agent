@@ -35,6 +35,7 @@ PUBLIC_DIR = PROJECT_ROOT / "public"
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/quicktime"}
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 APPLICATIONS = {"LabLink", "KarbarPro", "Shikha"}
+SCHEDULER_POLL_SECONDS = 10 * 60
 
 
 @asynccontextmanager
@@ -95,6 +96,7 @@ class KnowledgeInput(BaseModel):
     text: str = Field(min_length=20, max_length=20000)
     type: str = Field(default="product", max_length=40)
     sourceUrl: str | None = Field(default=None, max_length=1000)
+    product: str = Field(min_length=2, max_length=80)
 
 
 class SettingsInput(BaseModel):
@@ -120,6 +122,7 @@ class DraftInput(BaseModel):
     assetIds: list[str] = Field(default_factory=list, max_length=10)
     angle: str = Field(default="", max_length=500)
     visualContext: str = Field(default="", max_length=2000)
+    language: str = Field(default="bn", max_length=5)
 
 
 class AssetMetadataInput(BaseModel):
@@ -135,25 +138,51 @@ class PostUpdateInput(BaseModel):
 
 
 async def scheduler_loop():
+    last_checked_at = datetime.now(timezone.utc) - timedelta(seconds=SCHEDULER_POLL_SECONDS)
     while True:
+        checked_at = datetime.now(timezone.utc)
         try:
-            await run_schedule()
+            await run_schedule(last_checked_at, checked_at)
         except Exception:
             logger.exception("Scheduled marketing run failed")
-        await asyncio.sleep(60)
+        last_checked_at = checked_at
+        await asyncio.sleep(SCHEDULER_POLL_SECONDS)
 
 
-async def run_schedule():
+def due_schedule_slots(config: dict, checked_after: datetime, checked_at: datetime) -> list[str]:
+    """Return configured local-time slots crossed since the previous scheduler check."""
+    try:
+        zone = ZoneInfo(config["timezone"])
+    except Exception:
+        return []
+    if checked_after.tzinfo is None:
+        checked_after = checked_after.replace(tzinfo=timezone.utc)
+    if checked_at.tzinfo is None:
+        checked_at = checked_at.replace(tzinfo=timezone.utc)
+    first_local = checked_after.astimezone(zone)
+    last_local = checked_at.astimezone(zone)
+    slots: list[tuple[datetime, str]] = []
+    for date in {first_local.date(), last_local.date()}:
+        for time_value in config["postingTimes"]:
+            hour, minute = map(int, time_value.split(":"))
+            slot_local = datetime(date.year, date.month, date.day, hour, minute, tzinfo=zone)
+            slot_at = slot_local.astimezone(timezone.utc)
+            if checked_after < slot_at <= checked_at:
+                slots.append((slot_at, f"{date.isoformat()}-{time_value}"))
+    return [slot for _, slot in sorted(slots)]
+
+
+async def run_schedule(checked_after: datetime | None = None, checked_at: datetime | None = None):
     config = settings_dict()
     if not config["enabled"]:
         return
-    try:
-        local = datetime.now(ZoneInfo(config["timezone"]))
-    except Exception:
-        return
-    slot = f"{local.date().isoformat()}-{local.strftime('%H:%M')}"
-    if local.strftime("%H:%M") not in config["postingTimes"]:
-        return
+    checked_at = checked_at or datetime.now(timezone.utc)
+    checked_after = checked_after or checked_at - timedelta(seconds=SCHEDULER_POLL_SECONDS)
+    for slot in due_schedule_slots(config, checked_after, checked_at):
+        await run_schedule_slot(config, slot)
+
+
+async def run_schedule_slot(config: dict, slot: str):
     with connect() as db:
         claimed = db.execute(
             "INSERT OR IGNORE INTO schedule_runs(slot, run_at, status, error) VALUES (?, ?, 'running', NULL)",
@@ -190,7 +219,10 @@ def dashboard():
         "assets": list_assets(),
         "posts": list_posts(),
         "postEvents": list_post_events(),
-        "integrations": {"deepseek": bool(settings.deepseek_api_key), "facebook": settings.facebook_ready},
+        "integrations": {
+            "writer": "openai" if settings.openai_api_key else ("gemini" if settings.gemini_api_key else ("deepseek" if settings.deepseek_api_key else "")),
+            "facebook": settings.facebook_ready,
+        },
     }
 
 
@@ -211,6 +243,8 @@ def update_settings(input: SettingsInput):
 
 @app.post("/api/knowledge", dependencies=[Depends(authenticate)], status_code=201)
 def add_knowledge(input: KnowledgeInput):
+    if input.product not in APPLICATIONS:
+        raise HTTPException(400, "Choose LabLink, KarbarPro, or Shikha for this knowledge.")
     record = {
         "id": str(uuid4()),
         "title": input.title.strip(),
@@ -219,10 +253,11 @@ def add_knowledge(input: KnowledgeInput):
         "source_url": input.sourceUrl,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "reviewed": 1,
+        "product": input.product,
     }
     with connect() as db:
         db.execute(
-            "INSERT INTO knowledge(id, title, body, kind, source_url, created_at, reviewed) VALUES (:id, :title, :body, :kind, :source_url, :created_at, :reviewed)",
+            "INSERT INTO knowledge(id, title, body, kind, source_url, created_at, reviewed, product) VALUES (:id, :title, :body, :kind, :source_url, :created_at, :reviewed, :product)",
             record,
         )
     return {
@@ -230,6 +265,7 @@ def add_knowledge(input: KnowledgeInput):
         "title": record["title"],
         "text": record["body"],
         "type": record["kind"],
+        "product": record["product"],
         "reviewed": True,
     }
 
@@ -319,11 +355,13 @@ def update_asset(asset_id: str, input: AssetMetadataInput):
 
 @app.post("/api/posts/generate", dependencies=[Depends(authenticate)], status_code=201)
 async def make_draft(input: DraftInput):
+    if input.language not in {"bn", "en"}:
+        raise HTTPException(400, "Choose Bengali or English for the post language.")
     existing_ids = {asset["id"] for asset in list_assets()}
     if not set(input.assetIds) <= existing_ids:
         raise HTTPException(400, "One or more selected assets no longer exist.")
     try:
-        return await generate_post(input.assetIds, input.angle, input.visualContext)
+        return await generate_post(input.assetIds, input.angle, input.visualContext, language=input.language)
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
 
@@ -362,13 +400,18 @@ def update_post(post_id: str, input: PostUpdateInput):
 @app.post("/api/posts/publish-now", dependencies=[Depends(authenticate)])
 async def publish_now(input: DraftInput = DraftInput()):
     try:
+        if input.language not in {"bn", "en"}:
+            raise HTTPException(400, "Choose Bengali or English for the post language.")
         if input.assetIds:
             existing_ids = {asset["id"] for asset in list_assets()}
             if not set(input.assetIds) <= existing_ids:
                 raise HTTPException(400, "One or more selected assets no longer exist.")
-            post = await generate_post(input.assetIds, input.angle, input.visualContext, language="bn")
+            post = await generate_post(input.assetIds, input.angle, input.visualContext, language=input.language)
             return await asyncio.to_thread(publish_post, post["id"])
-        return await create_and_publish_bangla_post()
+        if input.language == "bn":
+            return await create_and_publish_bangla_post()
+        post = await generate_post([], input.angle, input.visualContext, language="en")
+        return await asyncio.to_thread(publish_post, post["id"])
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
 
