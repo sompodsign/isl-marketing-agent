@@ -42,6 +42,10 @@ def asset_label(relative_path: Path) -> str:
     return f"{product} — {name}"
 
 
+def asset_product(relative_path: Path) -> str:
+    return relative_path.parts[0].replace("_", " ").replace("-", " ").title()
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("Usage: python3 scripts/import_product_assets.py <asset-directory>")
@@ -74,8 +78,8 @@ def main() -> None:
             inserted = db.execute(
                 """
                 INSERT OR IGNORE INTO assets
-                (id, original_name, mime_type, path, label, description, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, original_name, mime_type, path, label, description, product, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     asset_id,
@@ -84,6 +88,7 @@ def main() -> None:
                     str(destination),
                     asset_label(relative_path),
                     f"Imported product asset from InariSoftLabs: {relative_path.as_posix()}",
+                    asset_product(relative_path),
                     datetime.now(timezone.utc).isoformat(),
                 ),
             ).rowcount

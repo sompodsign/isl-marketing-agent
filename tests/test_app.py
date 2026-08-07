@@ -68,6 +68,7 @@ def test_upload_checks_file_signature(isolated_data):
     with TestClient(main.app) as client:
         response = client.post(
             "/api/assets",
+            data={"product": "LabLink"},
             files={"file": ("fake.png", b"not a png", "image/png")},
         )
     assert response.status_code == 400
@@ -173,6 +174,8 @@ def test_generation_uses_human_example_and_validates_facts(isolated_data, monkey
     prompt = captured["messages"][1]["content"]
     assert "HUMAN WRITING RULES" in prompt
     assert "A calm owner-style example." in prompt
+    assert "everyday, educated voice commonly used by Bangladesh-based businesses" in prompt
+    assert "silently read the Bangla" in prompt
     assert post["factIds"] == ["fact-1"]
 
 
@@ -184,6 +187,19 @@ def test_bangla_terms_are_retrievable(isolated_data):
         )
     results = services.retrieve_knowledge("রিপোর্ট যাচাই")
     assert results[0]["id"] == "bangla"
+
+
+def test_selected_product_is_read_from_imported_asset_label():
+    assert services.selected_product([{"label": "KarbarPro — Sales History"}]) == "KarbarPro"
+
+
+def test_selected_product_uses_explicit_asset_assignment():
+    assert services.selected_product([{"product": "KarbarPro", "label": "Any screenshot"}]) == "KarbarPro"
+
+
+def test_selected_product_rejects_mixed_product_assets():
+    with pytest.raises(ValueError, match="one product only"):
+        services.selected_product([{"label": "KarbarPro — Sales History"}, {"label": "LabLink — Reports"}])
 
 
 def test_unreviewed_imports_are_not_retrieved(isolated_data):

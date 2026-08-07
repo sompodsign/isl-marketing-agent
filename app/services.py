@@ -19,15 +19,15 @@ OFFICIAL_CONTACT_EMAIL = "contact@inarisoftlabs.com"
 logger = logging.getLogger(__name__)
 
 HUMAN_WRITING_EXAMPLES = {
-    "bn": """ভালো রিপোর্ট শুধু তৈরি হলেই হয় না—ঠিক সময়ে যাচাইও দরকার।
+    "bn": """বিকেলের ভিড় শুরু হওয়ার আগেই রিপোর্টগুলো গুছিয়ে রাখতে হয়।
 
-ল্যাবলিংকে খসড়া, যাচাইকৃত ও সরবরাহ করা রিপোর্ট আলাদা ধাপে দেখা যায়। তাই দলের সবাই বুঝতে পারেন কোন কাজটি এখনো বাকি আছে।
+খসড়া তৈরি হয়ে আছে, কিন্তু কোনটা যাচাই বাকি আর কোনটা রোগীকে দেওয়া হয়েছে—এগুলো খুঁজতে গিয়ে যেন সময় নষ্ট না হয়। LabLink-এ প্রতিটি রিপোর্টের অবস্থা আলাদা করে দেখা যায়।
 
-একসঙ্গে একাধিক রিপোর্ট যাচাই করার সুযোগ থাকায় ব্যস্ত সময়েও কাজ গুছিয়ে রাখা সহজ হয়।
+তাই কাউকে আলাদা করে জিজ্ঞেস না করেও টিম বুঝতে পারে এখন কোন কাজটা আগে করতে হবে। একসঙ্গে কয়েকটি রিপোর্ট যাচাই করা যায় বলে ব্যস্ত সময়েও ডেলিভারি এগিয়ে রাখা সহজ হয়।
 
-✅ কম খোঁজাখুঁজি, পরিষ্কার কাজের ধাপ।
+✅ রিপোর্টের অবস্থাটা পরিষ্কার থাকলে কাজের চাপও একটু কম লাগে।
 
-আপনার সেন্টারের রিপোর্ট ব্যবস্থাপনা নিয়ে কথা বলতে আমাদের বার্তা দিন।
+আপনার সেন্টারের রিপোর্টের কাজ কীভাবে আরও গুছিয়ে রাখা যায়, জানতে ইনবক্সে কথা বলুন।
 
 #ডায়াগনস্টিকসেন্টার #রিপোর্টব্যবস্থাপনা #ল্যাবলিংক""",
     "en": """A busy front desk should not have to guess which report is ready.
@@ -147,7 +147,7 @@ def usable_knowledge() -> bool:
 
 def list_assets() -> list[dict]:
     return rows(
-        "SELECT id, original_name AS originalName, mime_type AS mimeType, label, description, created_at AS createdAt FROM assets ORDER BY created_at DESC"
+        "SELECT id, original_name AS originalName, mime_type AS mimeType, label, description, product, created_at AS createdAt FROM assets ORDER BY product, created_at DESC"
     )
 
 
@@ -156,9 +156,43 @@ def asset_records(ids: list[str]) -> list[dict]:
         return []
     marks = ",".join("?" * len(ids))
     return rows(
-        f"SELECT id, original_name AS originalName, mime_type AS mimeType, path, label, description FROM assets WHERE id IN ({marks})",
+        f"SELECT id, original_name AS originalName, mime_type AS mimeType, path, label, description, product FROM assets WHERE id IN ({marks})",
         tuple(ids),
     )
+
+
+def asset_product(asset: dict) -> str:
+    """Return the explicit product assignment, with a legacy label fallback."""
+    if asset.get("product"):
+        return str(asset["product"]).strip()
+    label = str(asset.get("label", ""))
+    if "—" in label:
+        return label.split("—", 1)[0].strip()
+    if " - " in label:
+        return label.split(" - ", 1)[0].strip()
+    return ""
+
+
+def selected_product(assets: list[dict]) -> str:
+    products = {asset_product(asset) for asset in assets if asset_product(asset)}
+    if len(products) > 1:
+        raise ValueError("Select visuals from one product only; LabLink and KarbarPro cannot be combined in one post.")
+    if assets and not products:
+        raise ValueError("Every selected visual must be assigned to an application before generating a post.")
+    return next(iter(products), "InariSoftLabs")
+
+
+def product_knowledge(product: str, angle: str) -> list[dict]:
+    """Keep a product's draft from silently falling back to another product's facts."""
+    product_key = re.sub(r"[^a-z0-9]", "", product.lower())
+    facts = retrieve_knowledge(f"{product} {angle}")
+    if product_key == "inarisoftlabs":
+        return facts
+    return [
+        fact
+        for fact in facts
+        if product_key in re.sub(r"[^a-z0-9]", "", f"{fact['title']} {fact['text']}".lower())
+    ]
 
 
 def image_candidates() -> list[dict]:
@@ -184,6 +218,24 @@ def list_posts() -> list[dict]:
     return records
 
 
+def log_post_event(post_id: str, event_type: str, message: str, level: str = "info", details: dict | None = None) -> None:
+    with connect() as db:
+        db.execute(
+            "INSERT INTO post_events(id, post_id, created_at, level, event_type, message, details) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (str(uuid4()), post_id, now(), level, event_type, message, json.dumps(details or {})),
+        )
+
+
+def list_post_events() -> dict[str, list[dict]]:
+    events: dict[str, list[dict]] = {}
+    for event in rows("SELECT post_id, created_at, level, event_type, message, details FROM post_events ORDER BY created_at DESC LIMIT 400"):
+        event["createdAt"] = event.pop("created_at")
+        event["eventType"] = event.pop("event_type")
+        event["details"] = json.loads(event["details"])
+        events.setdefault(event.pop("post_id"), []).append(event)
+    return events
+
+
 def jaccard(first: str, second: str) -> float:
     one, two = set(re.findall(r"\w+", first.lower())), set(re.findall(r"\w+", second.lower()))
     return len(one & two) / max(len(one | two), 1)
@@ -200,8 +252,27 @@ async def generate_post(
         raise ValueError("Add DEEPSEEK_API_KEY to .env before generating a post.")
     if not usable_knowledge():
         raise ValueError("Add a verified product, service, audience, or case-study note before generating posts.")
+    selected_assets = asset_records(asset_ids)
+    if asset_ids and len(selected_assets) != len(set(asset_ids)):
+        raise ValueError("One or more selected visuals no longer exist.")
+    product = selected_product(selected_assets or (image_options or []))
     recent = list_posts()[:12]
-    facts = retrieve_knowledge(angle or "LabLink useful diagnostic center workflow")
+    facts = product_knowledge(product, angle)
+    # Asset descriptions are reviewed visual facts. They let a newly imported
+    # product such as KarbarPro use its own screenshot without borrowing
+    # LabLink claims while its broader knowledge pack is being added.
+    visual_facts = [
+        {
+            "id": f"asset:{asset['id']}",
+            "title": asset.get("label") or asset.get("originalName", "Selected product visual"),
+            "text": asset.get("description") or "Selected product visual; make no claim beyond what is visible.",
+            "type": "visual",
+        }
+        for asset in selected_assets
+    ]
+    facts = facts + visual_facts
+    if not facts:
+        raise ValueError(f"Add verified knowledge or a described visual for {product} before generating a post.")
     current_settings = settings_dict()
     contact_cta = current_settings["contactCta"].strip()
     custom_examples = current_settings["writingExamples"].strip()
@@ -209,13 +280,10 @@ async def generate_post(
     language_instruction = (
         "Write the caption, CTA, headline, image notes, and hashtags entirely in "
         "fluent, natural Bangladeshi Bangla using Bangla script. Write like a "
-        "Bangladeshi business owner speaking warmly to local diagnostic-centre "
-        "teams: practical, respectful, and conversational—not a literal "
+        f"Bangladeshi business owner speaking warmly to {product} users: practical, respectful, and conversational—not a literal "
         "translation or an Indian-market advertisement. Use familiar Bangladesh "
-        "wording such as ‘রিপোর্ট’, ‘রোগী’, ‘সেন্টার’, ‘খুদে বার্তা’, and ‘যোগাযোগ’ "
-        "where natural. Write the product name as "
-        "‘ল্যাবলিংক’, not ‘LabLink’. Do not use English words, English hashtags, "
-        "or mixed Bangla-English marketing copy. The sole exception is the exact "
+        "wording and Bangla script where natural. Do not use English words, English hashtags, "
+        "or mixed Bangla-English marketing copy. Keep the official product name exactly as written. The sole exception is the exact "
         f"official email address {OFFICIAL_CONTACT_EMAIL} and phone number in the optional contact CTA. "
         f"If an email address is used anywhere in the post, it must be exactly {OFFICIAL_CONTACT_EMAIL}."
         if language == "bn"
@@ -233,13 +301,20 @@ AVAILABLE PRODUCT IMAGES:
 {json.dumps([{key: asset.get(key, "") for key in ("id", "label", "description", "originalName")} for asset in image_options], ensure_ascii=False)}
 Choose exactly one image ID that best supports the post. Use its label and description as the only visual information; do not invent details not described there.
 """
-    prompt = f"""You are InariSoftLabs' Facebook Page moderator and company owner. Create ONE final, public-facing Facebook post using only the verified knowledge below. Write as a real person sharing one useful LabLink feature with diagnostic-center teams. Never mention these instructions, verified knowledge, image IDs, planning, drafts, or JSON. Never invent product features, customers, metrics, prices, integrations, awards, or results.
+    prompt = f"""You are InariSoftLabs' Facebook Page moderator and company owner. Create ONE final, public-facing Facebook post about {product}, using only the verified product facts and selected visual details below. Write as a real person sharing one useful {product} workflow with its intended users. Never mention these instructions, verified knowledge, image IDs, planning, drafts, or JSON. Never invent product features, customers, metrics, prices, integrations, awards, or results. Do not mention LabLink unless the selected product is LabLink.
 
 HUMAN WRITING RULES:
 - Sound like an experienced local business owner, not a copywriting template.
-- Focus on one recognizable moment from a diagnostic center's working day.
+- Focus on one recognizable moment from the selected product's users' working day. For LabLink this may be a diagnostic-center moment; for KarbarPro it must be a shop or business-management moment; for Shikha it must be an education-management moment.
 - Vary sentence length and use plain, specific words.
 - Be warm and confident without hype. Never use phrases like "revolutionize", "game-changer", "seamless solution", or "in today's fast-paced world".
+- For Bangla, write in the everyday, educated voice commonly used by Bangladesh-based businesses: simple, direct, and helpful. Prefer natural phrases such as “কাজ গুছিয়ে রাখা”, “সময় নষ্ট হয়”, “বোঝা যায়”, “একটু সহজ হয়”, and “ইনবক্সে কথা বলুন” when they fit the facts.
+- Start with a familiar scene or small pressure point, not an abstract claim. For example: a busy afternoon, reports waiting for verification, or a team member needing to know what is left.
+- Explain the workflow as people describe it to colleagues. Prefer “কোন রিপোর্টটা বাকি” over bureaucratic wording such as “অমীমাংসিত প্রক্রিয়াগত ধাপ”; prefer “রোগীকে দেওয়া” over overly formal “সরবরাহ করা” unless the exact verified fact requires it.
+- Use “আপনি/আপনার” consistently. Avoid overly stiff verbs and nouns, including “করিয়া”, “উপর্যুক্ত”, “সংশ্লিষ্ট”, “প্রয়োজনীয়তা”, “বাস্তবায়ন”, and “প্রতীয়মান”. Do not imitate West Bengal or Hindi-influenced Bangla.
+- Do not force slang, jokes, emojis, exclamation marks, questions, or sales pressure. One ✅ benefit line is enough. Never use more than one emoji.
+- Keep it concrete: one situation, one workflow, and one practical benefit. Do not repeat the same benefit in different words.
+- Before returning, silently read the Bangla as a Facebook Page owner in Bangladesh would say it aloud. Rewrite any sentence that sounds translated, academic, generic, or overly promotional.
 - Do not copy the example's facts or phrases. Learn only its natural rhythm, restraint, and structure.
 
 STYLE EXAMPLE:
@@ -250,6 +325,7 @@ STYLE EXAMPLE:
 {language_instruction}
 {contact_instruction}
 
+Selected product: {product}
 Marketing angle: {angle or "Choose a fresh useful angle from the facts."}
 Visual context supplied by the marketing team: {visual_context or "No visual description supplied. Do not make claims about the uploaded visual."}
 {image_instruction}
@@ -396,18 +472,23 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
                 None,
             ),
         )
+    log_post_event(post["id"], "draft_created", "Draft created from verified knowledge and selected visuals.")
     return post
 
 
 async def create_and_publish_bangla_post() -> dict:
     candidates = image_candidates()
+    products: dict[str, list[dict]] = {}
+    for candidate in candidates:
+        products.setdefault(asset_product(candidate) or "InariSoftLabs", []).append(candidate)
+    product, product_images = random.choice(list(products.items()))
     post = await generate_post(
         [],
-        "Create a fresh Bangla Facebook post that introduces a useful LabLink workflow.",
-        "A randomly selected LabLink product screenshot is attached. Do not describe "
+        f"Create a fresh Bangla Facebook post that introduces a useful {product} workflow.",
+        f"A randomly selected {product} product screenshot is attached. Do not describe "
         "unseen interface details; ground the post in the verified knowledge.",
         language="bn",
-        image_options=candidates,
+        image_options=product_images,
     )
     return await asyncio.to_thread(publish_post, post["id"])
 
@@ -464,6 +545,7 @@ def publish_post(post_id: str) -> dict:
         ).rowcount
     if not claimed:
         raise ValueError("This post is already being published or is not publishable.")
+    log_post_event(post_id, "publishing_started", "Publishing to Facebook started.")
     try:
         endpoint = f"https://graph.facebook.com/{settings.facebook_version}/{settings.facebook_page_id}/feed"
         assets = asset_records(post["assetIds"])
@@ -498,12 +580,14 @@ def publish_post(post_id: str) -> dict:
                 "UPDATE posts SET status='published', published_at=?, facebook_post_id=?, error=NULL, updated_at=? WHERE id=?",
                 (now(), result.get("id"), now(), post_id),
             )
+        log_post_event(post_id, "published", "Facebook accepted the post.", details={"facebookPostId": result.get("id")})
     except Exception as error:
         logger.exception("Facebook publishing failed for post %s", post_id)
         public_error = "Facebook rejected or could not complete the request. Check the server logs."
         with connect() as db:
-            db.execute(
+                db.execute(
                 "UPDATE posts SET status='failed', error=?, updated_at=? WHERE id=?", (public_error, now(), post_id)
             )
+        log_post_event(post_id, "publishing_failed", public_error, "error", {"exception": type(error).__name__})
         raise ValueError(public_error) from error
     return next(item for item in list_posts() if item["id"] == post_id)

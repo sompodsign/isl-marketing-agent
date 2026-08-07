@@ -45,13 +45,19 @@ def initialise() -> None:
             CREATE TABLE IF NOT EXISTS assets (
               id TEXT PRIMARY KEY, original_name TEXT NOT NULL, mime_type TEXT NOT NULL,
               path TEXT NOT NULL, label TEXT NOT NULL DEFAULT '',
-              description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+              description TEXT NOT NULL DEFAULT '', product TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS posts (
               id TEXT PRIMARY KEY, status TEXT NOT NULL, caption TEXT NOT NULL, headline TEXT,
               cta TEXT, hashtags_json TEXT NOT NULL, image_notes TEXT, confidence TEXT,
               fact_ids_json TEXT NOT NULL, asset_ids_json TEXT NOT NULL, created_at TEXT NOT NULL,
               scheduled_for TEXT, published_at TEXT, facebook_post_id TEXT, error TEXT
+            );
+            CREATE TABLE IF NOT EXISTS post_events (
+              id TEXT PRIMARY KEY, post_id TEXT NOT NULL, created_at TEXT NOT NULL,
+              level TEXT NOT NULL, event_type TEXT NOT NULL, message TEXT NOT NULL,
+              details TEXT NOT NULL DEFAULT '{}',
+              FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS settings (
               key TEXT PRIMARY KEY, value TEXT NOT NULL
@@ -88,6 +94,14 @@ def initialise() -> None:
             db.execute("ALTER TABLE assets ADD COLUMN label TEXT NOT NULL DEFAULT ''")
         if "description" not in asset_columns:
             db.execute("ALTER TABLE assets ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+        if "product" not in asset_columns:
+            db.execute("ALTER TABLE assets ADD COLUMN product TEXT NOT NULL DEFAULT ''")
+        # Backfill the product relationship for assets imported before this field
+        # existed. New uploads must provide an explicit product in the UI/API.
+        db.execute(
+            """UPDATE assets SET product=trim(substr(label, 1, instr(label, '—') - 1))
+               WHERE product='' AND instr(label, '—') > 0"""
+        )
         post_columns = {row["name"] for row in db.execute("PRAGMA table_info(posts)")}
         if "updated_at" not in post_columns:
             db.execute("ALTER TABLE posts ADD COLUMN updated_at TEXT")
@@ -98,6 +112,7 @@ def initialise() -> None:
             db.execute("ALTER TABLE schedule_runs ADD COLUMN error TEXT")
         db.execute("CREATE INDEX IF NOT EXISTS posts_status_created ON posts(status, created_at)")
         db.execute("CREATE INDEX IF NOT EXISTS posts_scheduled_for ON posts(scheduled_for)")
+        db.execute("CREATE INDEX IF NOT EXISTS post_events_post_created ON post_events(post_id, created_at DESC)")
 
 
 def rows(query: str, parameters: tuple = ()) -> list[dict]:

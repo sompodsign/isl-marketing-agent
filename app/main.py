@@ -21,6 +21,8 @@ from app.services import (
     generate_post,
     list_assets,
     list_knowledge,
+    list_post_events,
+    log_post_event,
     list_posts,
     publish_post,
     save_settings,
@@ -32,6 +34,7 @@ security = HTTPBasic(auto_error=False)
 PUBLIC_DIR = PROJECT_ROOT / "public"
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/quicktime"}
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+APPLICATIONS = {"LabLink", "KarbarPro", "Shikha"}
 
 
 @asynccontextmanager
@@ -122,6 +125,7 @@ class DraftInput(BaseModel):
 class AssetMetadataInput(BaseModel):
     label: str = Field(default="", max_length=120)
     description: str = Field(default="", max_length=1000)
+    product: str = Field(min_length=2, max_length=80)
 
 
 class PostUpdateInput(BaseModel):
@@ -185,6 +189,7 @@ def dashboard():
         "knowledge": list_knowledge(),
         "assets": list_assets(),
         "posts": list_posts(),
+        "postEvents": list_post_events(),
         "integrations": {"deepseek": bool(settings.deepseek_api_key), "facebook": settings.facebook_ready},
     }
 
@@ -241,9 +246,13 @@ def approve_knowledge(knowledge_id: str):
 @app.post("/api/assets", dependencies=[Depends(authenticate)], status_code=201)
 async def add_asset(
     file: UploadFile = File(...),
+    product: str = Form(..., min_length=2, max_length=80),
     label: str = Form(default="", max_length=120),
     description: str = Form(default="", max_length=1000),
 ):
+    product = product.strip()
+    if product not in APPLICATIONS:
+        raise HTTPException(400, "Choose LabLink, KarbarPro, or Shikha for this visual.")
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(400, "Upload a JPG, PNG, WebP, GIF, MP4, or MOV file.")
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "-", file.filename or "asset")
@@ -265,8 +274,8 @@ async def add_asset(
         created = datetime.now(timezone.utc).isoformat()
         with connect() as db:
             db.execute(
-                "INSERT INTO assets VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (asset_id, safe_name, file.content_type, str(file_path), label.strip(), description.strip(), created),
+                "INSERT INTO assets (id, original_name, mime_type, path, label, description, product, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (asset_id, safe_name, file.content_type, str(file_path), label.strip(), description.strip(), product, created),
             )
     except Exception:
         file_path.unlink(missing_ok=True)
@@ -277,6 +286,7 @@ async def add_asset(
         "mimeType": file.content_type,
         "label": label.strip(),
         "description": description.strip(),
+        "product": product,
         "createdAt": created,
     }
 
@@ -295,14 +305,16 @@ def valid_media_signature(mime_type: str, signature: bytes) -> bool:
 
 @app.patch("/api/assets/{asset_id}", dependencies=[Depends(authenticate)])
 def update_asset(asset_id: str, input: AssetMetadataInput):
+    if input.product.strip() not in APPLICATIONS:
+        raise HTTPException(400, "Choose LabLink, KarbarPro, or Shikha for this visual.")
     with connect() as db:
         updated = db.execute(
-            "UPDATE assets SET label=?, description=? WHERE id=?",
-            (input.label.strip(), input.description.strip(), asset_id),
+            "UPDATE assets SET label=?, description=?, product=? WHERE id=?",
+            (input.label.strip(), input.description.strip(), input.product.strip(), asset_id),
         ).rowcount
     if not updated:
         raise HTTPException(404, "Asset not found.")
-    return {"id": asset_id, "label": input.label.strip(), "description": input.description.strip()}
+    return {"id": asset_id, "label": input.label.strip(), "description": input.description.strip(), "product": input.product.strip()}
 
 
 @app.post("/api/posts/generate", dependencies=[Depends(authenticate)], status_code=201)
@@ -343,16 +355,20 @@ def update_post(post_id: str, input: PostUpdateInput):
         ).rowcount
     if not updated:
         raise HTTPException(409, "Only draft or failed posts can be edited.")
+    log_post_event(post_id, "draft_edited", "Draft caption or selected visuals were updated.")
     return next(post for post in list_posts() if post["id"] == post_id)
 
 
 @app.post("/api/posts/publish-now", dependencies=[Depends(authenticate)])
-async def publish_now(request: Request):
+async def publish_now(input: DraftInput = DraftInput()):
     try:
-        post = await create_and_publish_bangla_post()
-        if "text/html" in request.headers.get("accept", ""):
-            return RedirectResponse(url="/", status_code=303)
-        return post
+        if input.assetIds:
+            existing_ids = {asset["id"] for asset in list_assets()}
+            if not set(input.assetIds) <= existing_ids:
+                raise HTTPException(400, "One or more selected assets no longer exist.")
+            post = await generate_post(input.assetIds, input.angle, input.visualContext, language="bn")
+            return await asyncio.to_thread(publish_post, post["id"])
+        return await create_and_publish_bangla_post()
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
 
