@@ -103,6 +103,7 @@ class SettingsInput(BaseModel):
     postsPerDay: int = Field(ge=1, le=3)
     timezone: str = Field(default="Asia/Dhaka", max_length=80)
     mode: str = Field(default="approval")
+    scheduleLanguage: str = Field(default="bn", max_length=5)
     enabled: bool = False
     postingTimes: list[str] = Field(default_factory=list, max_length=3)
     contactCta: str = Field(default="", max_length=300)
@@ -194,7 +195,9 @@ async def run_schedule_slot(config: dict, slot: str):
         candidates = [
             post for post in list_posts() if post["status"] in {"draft", "failed"} and not post["scheduledFor"]
         ]
-        post = candidates[-1] if candidates else await generate_post([], "", "")
+        post = candidates[-1] if candidates else await generate_post(
+            [], "", "", language=config.get("scheduleLanguage", "bn")
+        )
         if config["mode"] == "auto_publish":
             await asyncio.to_thread(publish_post, post["id"])
         else:
@@ -230,6 +233,8 @@ def dashboard():
 def update_settings(input: SettingsInput):
     if input.mode not in {"approval", "auto_publish"}:
         raise HTTPException(400, "Mode must be approval or auto_publish.")
+    if input.scheduleLanguage not in {"bn", "en"}:
+        raise HTTPException(400, "Choose Bengali or English for scheduled posts.")
     times = input.postingTimes
     defaults = {1: ["10:00"], 2: ["10:00", "18:00"], 3: ["09:00", "14:00", "20:00"]}
     if len(times) != input.postsPerDay:

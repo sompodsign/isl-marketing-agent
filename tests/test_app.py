@@ -64,12 +64,49 @@ def test_settings_reject_invalid_timezone_and_time(isolated_data):
         assert "24-hour" in response.json()["detail"]
 
 
+def test_settings_persist_scheduled_post_language(isolated_data):
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/settings",
+            json={
+                "postsPerDay": 1,
+                "timezone": "Asia/Dhaka",
+                "scheduleLanguage": "en",
+                "mode": "approval",
+                "enabled": True,
+                "postingTimes": ["10:00"],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["scheduleLanguage"] == "en"
+    assert services.settings_dict()["scheduleLanguage"] == "en"
+
+
 def test_scheduler_runs_a_slot_crossed_between_ten_minute_checks():
     config = {"timezone": "Asia/Dhaka", "postingTimes": ["10:00"]}
     checked_after = datetime(2026, 8, 8, 3, 59, tzinfo=timezone.utc)
     checked_at = datetime(2026, 8, 8, 4, 5, tzinfo=timezone.utc)
 
     assert main.due_schedule_slots(config, checked_after, checked_at) == ["2026-08-08-10:00"]
+
+
+def test_scheduler_uses_configured_language_for_generated_post(isolated_data, monkeypatch):
+    captured = {}
+
+    async def fake_generation(*args, **kwargs):
+        captured.update(kwargs)
+        return {"id": "generated-post"}
+
+    monkeypatch.setattr(main, "generate_post", fake_generation)
+    asyncio.run(
+        main.run_schedule_slot(
+            {"mode": "approval", "scheduleLanguage": "en"},
+            "2026-08-08-10:00",
+        )
+    )
+
+    assert captured["language"] == "en"
 
 
 def test_upload_checks_file_signature(isolated_data):

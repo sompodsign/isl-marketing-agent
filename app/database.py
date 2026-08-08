@@ -87,6 +87,7 @@ def initialise() -> None:
             "posts_per_day": "1",
             "timezone": "Asia/Dhaka",
             "mode": "approval",
+            "schedule_language": "bn",
             "enabled": "false",
             "posting_times": '["10:00"]',
             "writing_examples": "",
