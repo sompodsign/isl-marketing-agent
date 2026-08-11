@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import random
 import re
 import secrets
 from contextlib import asynccontextmanager
@@ -17,8 +18,10 @@ from pydantic import BaseModel, Field, field_validator
 from app.config import settings
 from app.database import PROJECT_ROOT, UPLOAD_DIR, connect, initialise
 from app.services import (
+    asset_product,
     create_and_publish_bangla_post,
     generate_post,
+    image_candidates,
     list_assets,
     list_knowledge,
     list_post_events,
@@ -195,9 +198,17 @@ async def run_schedule_slot(config: dict, slot: str):
         candidates = [
             post for post in list_posts() if post["status"] in {"draft", "failed"} and not post["scheduledFor"]
         ]
-        post = candidates[-1] if candidates else await generate_post(
-            [], "", "", language=config.get("scheduleLanguage", "bn")
-        )
+        if candidates:
+            post = candidates[-1]
+        else:
+            images = image_candidates()
+            products: dict[str, list[dict]] = {}
+            for candidate in images:
+                products.setdefault(asset_product(candidate) or "InariSoftLabs", []).append(candidate)
+            product, product_images = random.choice(list(products.items()))
+            post = await generate_post(
+                [], "", "", language=config.get("scheduleLanguage", "bn"), image_options=product_images
+            )
         if config["mode"] == "auto_publish":
             await asyncio.to_thread(publish_post, post["id"])
         else:
