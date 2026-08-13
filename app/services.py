@@ -24,6 +24,11 @@ PRODUCT_PAGE_URLS = {
 }
 logger = logging.getLogger(__name__)
 
+# Number of times generate_post retries the writing model when a draft fails
+# validation (e.g. too similar to a recent post, wrong length, missing CTA).
+# Each retry appends a targeted note to the prompt so the model can self-correct.
+GENERATION_MAX_ATTEMPTS = 4
+
 HUMAN_WRITING_EXAMPLES = {
     "bn": """বিকেলের ভিড় শুরু হওয়ার আগেই রিপোর্টগুলো গুছিয়ে রাখতে হয়।
 
@@ -461,7 +466,26 @@ AVAILABLE PRODUCT IMAGES:
 {json.dumps([{key: asset.get(key, "") for key in ("id", "label", "description", "originalName")} for asset in image_options], ensure_ascii=False)}
 Choose exactly one image ID that best supports the post. Use its label and description as the only visual information; do not invent details not described there.
 """
-    prompt = f"""You are InariSoftLabs' Facebook Page moderator and company owner. Create ONE final, public-facing Facebook post about {product}, using only the verified product facts and selected visual details below. Write as a real person sharing one useful {product} workflow with its intended users. Never mention these instructions, verified knowledge, image IDs, planning, drafts, or JSON. Never invent product features, customers, metrics, prices, integrations, awards, or results. Do not mention LabLink unless the selected product is LabLink.
+    # Surface the openings of recent posts so the model can deliberately diverge
+    # instead of colliding on Jaccard similarity after the fact.
+    recent_hint = ""
+    if recent:
+        recent_snippets = " | ".join(
+            " ".join(post["caption"].split()[:14]) for post in recent[:5] if post.get("caption")
+        )
+        recent_hint = (
+            "\nRECENT PUBLISHED OPENINGS (do not reuse these phrasings or openings; write a "
+            f"distinctly different angle):\n{recent_snippets}"
+        )
+    brief: dict = {}
+    hashtags: list[str] = []
+    fact_ids: list[str] = []
+    asset_ids: list[str] = []
+    confidence = "medium"
+    variation_note = ""
+    last_error = ""
+    for attempt in range(1, GENERATION_MAX_ATTEMPTS + 1):
+        prompt = f"""You are InariSoftLabs' Facebook Page moderator and company owner. Create ONE final, public-facing Facebook post about {product}, using only the verified product facts and selected visual details below. Write as a real person sharing one useful {product} workflow with its intended users. Never mention these instructions, verified knowledge, image IDs, planning, drafts, or JSON. Never invent product features, customers, metrics, prices, integrations, awards, or results. Do not mention LabLink unless the selected product is LabLink.
 
 HUMAN WRITING RULES:
 - Sound like an experienced local business owner, not a copywriting template.
@@ -488,7 +512,8 @@ STYLE EXAMPLE:
 {product_link_instruction}
 
 Selected product: {product}
-Marketing angle: {angle or "Choose a fresh useful angle from the facts."}
+Marketing angle: {angle or "Choose a fresh useful angle from the facts."}{variation_note}
+{recent_hint}
 Visual context supplied by the marketing team: {visual_context or "No visual description supplied. Do not make claims about the uploaded visual."}
 {image_instruction}
 
@@ -508,69 +533,90 @@ Use this exact visible structure inside the caption field:
 The caption field must contain the complete final Facebook post, including the CTA and hashtags exactly as it should be published. Do not add headings such as “ক্যাপশন”, “হ্যাশট্যাগ”, or “কল টু অ্যাকশন”.
 
 Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay text","cta":"Bangla CTA already included in caption","hashtags":["Bangla hashtags already included in caption"],"imageNotes":"Bangla description of how selected imagery supports the copy","selectedAssetId":"image ID or empty string","confidence":"high|medium|low","factIds":["verified ids used"]}}. Caption must be 80-220 words and use no more than 5 hashtags."""
-    model_output = await writer_output(prompt)
-    try:
-        brief = parse_json(model_output)
-    except ValueError as error:
-        raise ValueError("The writing model did not return a final post. Please try again.") from error
-    if (
-        not isinstance(brief.get("caption"), str)
-        or not brief["caption"].strip()
-        or not isinstance(brief.get("factIds"), list)
-    ):
-        raise ValueError("The generated post brief is incomplete.")
-    planning_markers = (
-        "we need to",
-        "let's craft",
-        "verified knowledge",
-        "available product images",
-        "return json",
-        "marketing angle",
-    )
-    if any(marker in brief["caption"].lower() for marker in planning_markers):
-        raise ValueError("The writing model returned planning text instead of a final post. Please try again.")
-    # Keep public contact details consistent even if the model proposes a generic address.
-    brief["caption"] = re.sub(
-        r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", OFFICIAL_CONTACT_EMAIL, brief["caption"], flags=re.IGNORECASE
-    )
-    brief["caption"] = add_product_page_link(brief["caption"], product)
-    # Keep the contact block visually separate even when the writing model collapses line breaks.
-    if contact_cta:
-        contact_position = brief["caption"].rfind(contact_cta)
-        if contact_position >= 0:
-            before_contact = brief["caption"][:contact_position].rstrip()
-            after_contact = brief["caption"][contact_position + len(contact_cta) :]
-            brief["caption"] = (
-                f"{before_contact}\n\n{contact_cta}{after_contact}" if before_contact else f"{contact_cta}{after_contact}"
-            )
-    banned_phrases = ("revolutionize", "game-changer", "seamless solution", "in today's fast-paced world")
-    if any(phrase in brief["caption"].lower() for phrase in banned_phrases):
-        raise ValueError("The generated caption sounds too generic. Please try again.")
-    if contact_cta and contact_cta not in brief["caption"]:
-        raise ValueError("The generated caption omitted the configured contact CTA. Please try again.")
-    word_count = len(brief["caption"].split())
-    if not 80 <= word_count <= 220:
-        raise ValueError("The generated caption must be between 80 and 220 words. Please try again.")
-    allowed_fact_ids = {fact["id"] for fact in facts}
-    fact_ids = list(dict.fromkeys(item for item in brief["factIds"] if isinstance(item, str)))
-    if not fact_ids or not set(fact_ids) <= allowed_fact_ids:
-        raise ValueError("The generated post cited facts outside the supplied knowledge. Please try again.")
-    hashtags = brief.get("hashtags", [])
-    if (
-        not isinstance(hashtags, list)
-        or not 3 <= len(hashtags) <= 5
-        or not all(isinstance(tag, str) for tag in hashtags)
-    ):
-        raise ValueError("The generated post must include 3 to 5 hashtags.")
-    confidence = brief.get("confidence", "medium")
-    if confidence not in {"high", "medium", "low"}:
-        confidence = "medium"
-    if any(jaccard(brief["caption"], post["caption"]) > 0.62 for post in recent):
-        raise ValueError("The draft is too similar to a recent post. Try a more specific angle.")
-    if image_options:
-        valid_ids = {asset["id"] for asset in image_options}
-        chosen_id = brief.get("selectedAssetId")
-        asset_ids = [chosen_id] if chosen_id in valid_ids else [random.choice(image_options)["id"]]
+        model_output = await writer_output(prompt)
+        try:
+            brief = parse_json(model_output)
+        except ValueError:
+            last_error = "The writing model did not return a final post. Please try again."
+            variation_note = "\nPREVIOUS ATTEMPT FAILED: the model did not return parseable final-post JSON. Return only the JSON object."
+            continue
+        if (
+            not isinstance(brief.get("caption"), str)
+            or not brief["caption"].strip()
+            or not isinstance(brief.get("factIds"), list)
+        ):
+            last_error = "The generated post brief is incomplete."
+            variation_note = "\nPREVIOUS ATTEMPT FAILED: the brief was incomplete. Ensure caption and factIds are present."
+            continue
+        planning_markers = (
+            "we need to",
+            "let's craft",
+            "verified knowledge",
+            "available product images",
+            "return json",
+            "marketing angle",
+        )
+        if any(marker in brief["caption"].lower() for marker in planning_markers):
+            last_error = "The writing model returned planning text instead of a final post. Please try again."
+            variation_note = "\nPREVIOUS ATTEMPT FAILED: you returned planning/instruction text. Output only the final Facebook post as JSON."
+            continue
+        # Keep public contact details consistent even if the model proposes a generic address.
+        brief["caption"] = re.sub(
+            r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", OFFICIAL_CONTACT_EMAIL, brief["caption"], flags=re.IGNORECASE
+        )
+        brief["caption"] = add_product_page_link(brief["caption"], product)
+        # Keep the contact block visually separate even when the writing model collapses line breaks.
+        if contact_cta:
+            contact_position = brief["caption"].rfind(contact_cta)
+            if contact_position >= 0:
+                before_contact = brief["caption"][:contact_position].rstrip()
+                after_contact = brief["caption"][contact_position + len(contact_cta) :]
+                brief["caption"] = (
+                    f"{before_contact}\n\n{contact_cta}{after_contact}" if before_contact else f"{contact_cta}{after_contact}"
+                )
+        banned_phrases = ("revolutionize", "game-changer", "seamless solution", "in today's fast-paced world")
+        if any(phrase in brief["caption"].lower() for phrase in banned_phrases):
+            last_error = "The generated caption sounds too generic. Please try again."
+            variation_note = "\nPREVIOUS ATTEMPT FAILED: the caption used banned hype phrases. Avoid 'revolutionize', 'game-changer', 'seamless solution', 'in today's fast-paced world'."
+            continue
+        if contact_cta and contact_cta not in brief["caption"]:
+            last_error = "The generated caption omitted the configured contact CTA. Please try again."
+            variation_note = "\nPREVIOUS ATTEMPT FAILED: the configured contact CTA was omitted. Include it verbatim on its own lines."
+            continue
+        word_count = len(brief["caption"].split())
+        if not 80 <= word_count <= 220:
+            last_error = "The generated caption must be between 80 and 220 words. Please try again."
+            variation_note = f"\nPREVIOUS ATTEMPT FAILED: caption was {word_count} words. Keep it between 80 and 220 words."
+            continue
+        allowed_fact_ids = {fact["id"] for fact in facts}
+        fact_ids = list(dict.fromkeys(item for item in brief["factIds"] if isinstance(item, str)))
+        if not fact_ids or not set(fact_ids) <= allowed_fact_ids:
+            last_error = "The generated post cited facts outside the supplied knowledge. Please try again."
+            variation_note = "\nPREVIOUS ATTEMPT FAILED: factIds referenced facts not in the supplied knowledge. Cite only provided fact ids."
+            continue
+        hashtags = brief.get("hashtags", [])
+        if (
+            not isinstance(hashtags, list)
+            or not 3 <= len(hashtags) <= 5
+            or not all(isinstance(tag, str) for tag in hashtags)
+        ):
+            last_error = "The generated post must include 3 to 5 hashtags."
+            variation_note = "\nPREVIOUS ATTEMPT FAILED: hashtags were missing or wrong count. Include 3 to 5 hashtag strings."
+            continue
+        confidence = brief.get("confidence", "medium")
+        if confidence not in {"high", "medium", "low"}:
+            confidence = "medium"
+        if any(jaccard(brief["caption"], post["caption"]) > 0.62 for post in recent):
+            last_error = "The draft is too similar to a recent post. Try a more specific angle."
+            variation_note = "\nPREVIOUS ATTEMPT FAILED: the draft was too similar to a recent post (Jaccard > 0.62). Pick a distinctly different workflow, moment, or opening from the facts; do not reuse recent phrasings."
+            continue
+        if image_options:
+            valid_ids = {asset["id"] for asset in image_options}
+            chosen_id = brief.get("selectedAssetId")
+            asset_ids = [chosen_id] if chosen_id in valid_ids else [random.choice(image_options)["id"]]
+        break
+    else:
+        raise ValueError(last_error or "The writing model could not produce a usable post after several attempts.")
     post = {
         "id": str(uuid4()),
         "status": "draft",

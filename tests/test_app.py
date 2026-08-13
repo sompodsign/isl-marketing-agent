@@ -225,6 +225,77 @@ def test_generation_uses_human_example_and_validates_facts(isolated_data, monkey
     assert post["factIds"] == ["fact-1"]
 
 
+def test_generate_post_retries_when_draft_is_too_similar(isolated_data, monkeypatch):
+    with database.connect() as db:
+        db.execute(
+            "INSERT INTO knowledge(id, title, body, kind, source_url, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "fact-1",
+                "Report workflow",
+                "LabLink keeps report work in draft, verified, and delivered stages for center teams.",
+                "workflow",
+                None,
+                services.now(),
+            ),
+        )
+    filler_a = ["report"] * 74
+    similar_caption = "Report opening here\n\n" + " ".join(filler_a) + "\n\n#One #Two #Three"
+    filler_b = ["invoice"] * 74
+    divergent_caption = "Invoice opening here\n\n" + " ".join(filler_b) + "\n\n#Alpha #Beta #Gamma"
+    # Seed a recent post identical to the first draft so Jaccard = 1.0 > 0.62.
+    insert_draft(caption=similar_caption)
+
+    def payload_for(caption):
+        return {
+            "caption": caption,
+            "headline": "Headline",
+            "cta": "Message us",
+            "hashtags": ["#One", "#Two", "#Three"] if "report" in caption else ["#Alpha", "#Beta", "#Gamma"],
+            "imageNotes": "",
+            "selectedAssetId": "",
+            "confidence": "high",
+            "factIds": ["fact-1"],
+        }
+
+    call_log = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            # First call returns the too-similar draft; later calls return the divergent one.
+            caption = similar_caption if len(call_log) == 1 else divergent_caption
+            return {"choices": [{"message": {"content": json.dumps(payload_for(caption))}}]}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            call_log.append(url)
+            return FakeResponse()
+
+    monkeypatch.setattr(services.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(
+        services,
+        "settings",
+        SimpleNamespace(deepseek_api_key="key", deepseek_model="model"),
+    )
+
+    post = asyncio.run(services.generate_post([], "report workflow"))
+    assert len(call_log) == 2, "first draft should be rejected as too similar and retried once"
+    assert "invoice" in post["caption"]
+
+
 def test_bangla_terms_are_retrievable(isolated_data):
     with database.connect() as db:
         db.execute(
