@@ -17,6 +17,11 @@ from app.config import settings
 from app.database import connect, rows
 
 OFFICIAL_CONTACT_EMAIL = "contact@inarisoftlabs.com"
+PRODUCT_PAGE_URLS = {
+    "LabLink": "https://inarisoftlabs.com/products/lablink",
+    "KarbarPro": "https://inarisoftlabs.com/products/lablink",
+    "Shikha": "https://inarisoftlabs.com/products/shikha",
+}
 logger = logging.getLogger(__name__)
 
 HUMAN_WRITING_EXAMPLES = {
@@ -197,6 +202,25 @@ def selected_product(assets: list[dict]) -> str:
     if assets and not products:
         raise ValueError("Every selected visual must be assigned to an application before generating a post.")
     return next(iter(products), "InariSoftLabs")
+
+
+def product_page_url(product: str) -> str | None:
+    """Return the public product page configured for a generated post."""
+    return PRODUCT_PAGE_URLS.get(product)
+
+
+def add_product_page_link(caption: str, product: str) -> str:
+    """Ensure the product page is visible in the final published caption."""
+    url = product_page_url(product)
+    if not url or url in caption:
+        return caption
+
+    lines = caption.rstrip().splitlines()
+    hashtag_line = next((index for index in range(len(lines) - 1, -1, -1) if "#" in lines[index]), None)
+    if hashtag_line is None:
+        return f"{caption.rstrip()}\n\n{url}"
+    lines.insert(hashtag_line, url)
+    return "\n".join(lines)
 
 
 def product_knowledge(product: str, angle: str) -> list[dict]:
@@ -424,6 +448,12 @@ async def generate_post(
         if contact_cta
         else "Use a soft CTA such as asking readers to message the Page or learn more."
     )
+    product_url = product_page_url(product)
+    product_link_instruction = (
+        f"Include this exact product page URL on its own line in the caption: {product_url}"
+        if product_url
+        else "Do not add a product page URL because this is a general InariSoftLabs post."
+    )
     image_instruction = ""
     if image_options:
         image_instruction = f"""
@@ -455,6 +485,7 @@ STYLE EXAMPLE:
 
 {language_instruction}
 {contact_instruction}
+{product_link_instruction}
 
 Selected product: {product}
 Marketing angle: {angle or "Choose a fresh useful angle from the facts."}
@@ -502,6 +533,7 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
     brief["caption"] = re.sub(
         r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", OFFICIAL_CONTACT_EMAIL, brief["caption"], flags=re.IGNORECASE
     )
+    brief["caption"] = add_product_page_link(brief["caption"], product)
     # Keep the contact block visually separate even when the writing model collapses line breaks.
     if contact_cta:
         contact_position = brief["caption"].rfind(contact_cta)
@@ -676,10 +708,16 @@ def publish_post(post_id: str) -> dict:
         ).rowcount
     if not claimed:
         raise ValueError("This post is already being published or is not publishable.")
+    assets = asset_records(post["assetIds"])
+    product = selected_product(assets) if assets else "InariSoftLabs"
+    original_caption = post["caption"]
+    post["caption"] = add_product_page_link(post["caption"], product)
+    if post["caption"] != original_caption:
+        with connect() as db:
+            db.execute("UPDATE posts SET caption=?, updated_at=? WHERE id=?", (post["caption"], now(), post_id))
     log_post_event(post_id, "publishing_started", "Publishing to Facebook started.")
     try:
         endpoint = f"https://graph.facebook.com/{settings.facebook_version}/{settings.facebook_page_id}/feed"
-        assets = asset_records(post["assetIds"])
         images = [asset for asset in assets if asset["mimeType"].startswith("image/")]
         videos = [asset for asset in assets if asset["mimeType"].startswith("video/")]
         if videos:

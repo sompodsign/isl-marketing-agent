@@ -243,6 +243,21 @@ def test_selected_product_uses_explicit_asset_assignment():
     assert services.selected_product([{"product": "KarbarPro", "label": "Any screenshot"}]) == "KarbarPro"
 
 
+def test_product_page_links_are_added_before_hashtags():
+    caption = "Opening line\n\nA useful workflow for the team.\n\n#One #Two #Three"
+
+    assert services.add_product_page_link(caption, "LabLink") == (
+        "Opening line\n\nA useful workflow for the team.\n\n"
+        "https://inarisoftlabs.com/products/lablink\n#One #Two #Three"
+    )
+    assert services.add_product_page_link(caption, "KarbarPro").count(
+        "https://inarisoftlabs.com/products/lablink"
+    ) == 1
+    assert services.add_product_page_link(caption, "Shikha").count(
+        "https://inarisoftlabs.com/products/shikha"
+    ) == 1
+
+
 def test_karbarpro_has_its_own_writing_example(isolated_data, monkeypatch):
     captured = {}
 
