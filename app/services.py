@@ -19,7 +19,7 @@ from app.database import connect, rows
 OFFICIAL_CONTACT_EMAIL = "contact@inarisoftlabs.com"
 PRODUCT_PAGE_URLS = {
     "LabLink": "https://inarisoftlabs.com/products/lablink",
-    "KarbarPro": "https://inarisoftlabs.com/products/lablink",
+    "KarbarPro": "https://inarisoftlabs.com/products/karbarpro",
     "Shikha": "https://inarisoftlabs.com/products/shikha",
 }
 logger = logging.getLogger(__name__)
