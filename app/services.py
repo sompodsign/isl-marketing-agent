@@ -229,6 +229,25 @@ def add_product_page_link(caption: str, product: str) -> str:
     return "\n".join(lines)
 
 
+def ensure_contact_cta(caption: str, contact_cta: str) -> str:
+    """Keep the configured contact block in the final public caption."""
+    if not contact_cta:
+        return caption
+    contact_position = caption.rfind(contact_cta)
+    if contact_position >= 0:
+        before_contact = caption[:contact_position].rstrip()
+        after_contact = caption[contact_position + len(contact_cta) :]
+        return f"{before_contact}\n\n{contact_cta}{after_contact}" if before_contact else f"{contact_cta}{after_contact}"
+
+    lines = caption.rstrip().splitlines()
+    hashtag_line = next((index for index in range(len(lines) - 1, -1, -1) if "#" in lines[index]), None)
+    if hashtag_line is None:
+        return f"{caption.rstrip()}\n\n{contact_cta}"
+    before = "\n".join(lines[:hashtag_line]).rstrip()
+    hashtags = "\n".join(lines[hashtag_line:]).lstrip()
+    return f"{before}\n\n{contact_cta}\n\n{hashtags}"
+
+
 def product_knowledge(product: str, angle: str) -> list[dict]:
     """Keep a product's draft from silently falling back to another product's facts."""
     product_key = re.sub(r"[^a-z0-9]", "", product.lower())
@@ -575,24 +594,12 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
         brief["caption"] = re.sub(
             r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", OFFICIAL_CONTACT_EMAIL, brief["caption"], flags=re.IGNORECASE
         )
+        brief["caption"] = ensure_contact_cta(brief["caption"], contact_cta)
         brief["caption"] = add_product_page_link(brief["caption"], product)
-        # Keep the contact block visually separate even when the writing model collapses line breaks.
-        if contact_cta:
-            contact_position = brief["caption"].rfind(contact_cta)
-            if contact_position >= 0:
-                before_contact = brief["caption"][:contact_position].rstrip()
-                after_contact = brief["caption"][contact_position + len(contact_cta) :]
-                brief["caption"] = (
-                    f"{before_contact}\n\n{contact_cta}{after_contact}" if before_contact else f"{contact_cta}{after_contact}"
-                )
         banned_phrases = ("revolutionize", "game-changer", "seamless solution", "in today's fast-paced world")
         if any(phrase in brief["caption"].lower() for phrase in banned_phrases):
             last_error = "The generated caption sounds too generic. Please try again."
             variation_note = "\nPREVIOUS ATTEMPT FAILED: the caption used banned hype phrases. Avoid 'revolutionize', 'game-changer', 'seamless solution', 'in today's fast-paced world'."
-            continue
-        if contact_cta and contact_cta not in brief["caption"]:
-            last_error = "The generated caption omitted the configured contact CTA. Please try again."
-            variation_note = "\nPREVIOUS ATTEMPT FAILED: the configured contact CTA was omitted. Include it verbatim on its own lines."
             continue
         word_count = len(brief["caption"].split())
         if not 80 <= word_count <= 220:

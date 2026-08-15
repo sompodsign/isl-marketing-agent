@@ -329,6 +329,12 @@ def test_product_page_links_are_added_before_hashtags():
     ) == "Learn more at www.inarisoftlabs.com\n\n#One"
 
 
+def test_missing_configured_contact_cta_is_added_before_hashtags():
+    assert services.ensure_contact_cta("Useful details\n\n#One #Two #Three", "Call: 01705569764") == (
+        "Useful details\n\nCall: 01705569764\n\n#One #Two #Three"
+    )
+
+
 def test_publish_now_without_a_selected_asset_uses_an_available_image(monkeypatch):
     captured = {}
 
