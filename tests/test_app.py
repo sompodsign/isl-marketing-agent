@@ -335,6 +335,19 @@ def test_missing_configured_contact_cta_is_added_before_hashtags():
     )
 
 
+def test_website_link_normalization_does_not_change_contact_email():
+    caption = "Email contact@inarisoftlabs.com\n\nhttps://inarisoftlabs.com/products/lablink\n\n#One"
+    assert services.add_product_page_link(caption, "LabLink") == (
+        "Email contact@inarisoftlabs.com\n\nwww.inarisoftlabs.com\n\n#One"
+    )
+
+
+def test_publish_rejects_post_without_an_image(isolated_data):
+    post_id = insert_draft()
+    with pytest.raises(ValueError, match="Select one product image"):
+        services.publish_post(post_id)
+
+
 def test_publish_now_without_a_selected_asset_uses_an_available_image(monkeypatch):
     captured = {}
 

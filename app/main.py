@@ -196,7 +196,9 @@ async def run_schedule_slot(config: dict, slot: str):
             return
     try:
         candidates = [
-            post for post in list_posts() if post["status"] in {"draft", "failed"} and not post["scheduledFor"]
+            post
+            for post in list_posts()
+            if post["status"] in {"draft", "failed"} and post["assetIds"] and not post["scheduledFor"]
         ]
         if candidates:
             post = candidates[-1]
@@ -378,6 +380,8 @@ def update_asset(asset_id: str, input: AssetMetadataInput):
 async def make_draft(input: DraftInput):
     if input.language not in {"bn", "en"}:
         raise HTTPException(400, "Choose Bengali or English for the post language.")
+    if not input.assetIds:
+        raise HTTPException(400, "Select one product image before generating a post.")
     existing_ids = {asset["id"] for asset in list_assets()}
     if not set(input.assetIds) <= existing_ids:
         raise HTTPException(400, "One or more selected assets no longer exist.")

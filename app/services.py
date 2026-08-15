@@ -208,7 +208,9 @@ def selected_product(assets: list[dict]) -> str:
 def add_product_page_link(caption: str, product: str) -> str:
     """Ensure every post shares only the canonical InariSoftLabs website."""
     del product
-    website_pattern = re.compile(r"(?:https?://)?(?:www\.)?inarisoftlabs\.com(?:/[^\s]*)?", re.IGNORECASE)
+    website_pattern = re.compile(
+        r"(?<![@\w.-])(?:https?://)?(?:www\.)?inarisoftlabs\.com(?:/[^\s]*)?", re.IGNORECASE
+    )
     lines: list[str] = []
     link_present = False
     for line in caption.rstrip().splitlines():
@@ -452,6 +454,7 @@ async def generate_post(
     # Asset descriptions are reviewed visual facts. They let a newly imported
     # product such as KarbarPro use its own screenshot without borrowing
     # LabLink claims while its broader knowledge pack is being added.
+    image_choices = selected_assets or (image_options or [])
     visual_facts = [
         {
             "id": f"asset:{asset['id']}",
@@ -459,7 +462,7 @@ async def generate_post(
             "text": asset.get("description") or "Selected product visual; make no claim beyond what is visible.",
             "type": "visual",
         }
-        for asset in selected_assets
+        for asset in image_choices
     ]
     facts = facts + visual_facts
     if not facts:
@@ -490,11 +493,11 @@ async def generate_post(
         "Do not include any other website address, URL path, or product-page link."
     )
     image_instruction = ""
-    if image_options:
+    if image_choices:
         image_instruction = f"""
 AVAILABLE PRODUCT IMAGES:
-{json.dumps([{key: asset.get(key, "") for key in ("id", "label", "description", "originalName")} for asset in image_options], ensure_ascii=False)}
-Choose exactly one image ID that best supports the post. Use its label and description as the only visual information; do not invent details not described there.
+{json.dumps([{key: asset.get(key, "") for key in ("id", "label", "description", "originalName")} for asset in image_choices], ensure_ascii=False)}
+Choose exactly one image ID that matches the workflow in the caption. The caption and imageNotes must use only that image's label and description as visual information; do not invent unseen details or write copy for a different screen.
 """
     # Surface the openings of recent posts so the model can deliberately diverge
     # instead of colliding on Jaccard similarity after the fact.
@@ -628,10 +631,17 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
             last_error = "The draft is too similar to a recent post. Try a more specific angle."
             variation_note = "\nPREVIOUS ATTEMPT FAILED: the draft was too similar to a recent post (Jaccard > 0.62). Pick a distinctly different workflow, moment, or opening from the facts; do not reuse recent phrasings."
             continue
-        if image_options:
-            valid_ids = {asset["id"] for asset in image_options}
+        if image_choices:
+            valid_ids = {asset["id"] for asset in image_choices}
             chosen_id = brief.get("selectedAssetId")
-            asset_ids = [chosen_id] if chosen_id in valid_ids else [random.choice(image_options)["id"]]
+            if chosen_id not in valid_ids:
+                last_error = "The writing model did not select one of the available product images."
+                variation_note = "\nPREVIOUS ATTEMPT FAILED: selectedAssetId must be exactly one of the available image IDs."
+                continue
+            asset_ids = [chosen_id]
+            visual_fact_id = f"asset:{chosen_id}"
+            if visual_fact_id not in fact_ids:
+                fact_ids.append(visual_fact_id)
         break
     else:
         raise ValueError(last_error or "The writing model could not produce a usable post after several attempts.")
@@ -768,6 +778,8 @@ def publish_post(post_id: str) -> dict:
         raise ValueError("Post not found.")
     if post["status"] == "published":
         return post
+    if not post["assetIds"]:
+        raise ValueError("Select one product image before publishing.")
     with connect() as db:
         claimed = db.execute(
             "UPDATE posts SET status='publishing', error=NULL, updated_at=? WHERE id=? AND status IN ('draft', 'failed')",
@@ -776,6 +788,8 @@ def publish_post(post_id: str) -> dict:
     if not claimed:
         raise ValueError("This post is already being published or is not publishable.")
     assets = asset_records(post["assetIds"])
+    if not assets:
+        raise ValueError("The selected product image no longer exists. Choose another image before publishing.")
     product = selected_product(assets) if assets else "InariSoftLabs"
     original_caption = post["caption"]
     post["caption"] = add_product_page_link(post["caption"], product)
