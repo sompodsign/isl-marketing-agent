@@ -227,6 +227,7 @@ async def run_schedule_slot(config: dict, slot: str):
 
 @app.get("/api/dashboard", dependencies=[Depends(authenticate)])
 def dashboard():
+    writer_provider = getattr(settings, "writer_provider", "auto")
     return {
         "settings": settings_dict(),
         "knowledge": list_knowledge(),
@@ -234,7 +235,11 @@ def dashboard():
         "posts": list_posts(),
         "postEvents": list_post_events(),
         "integrations": {
-            "writer": "openai" if settings.openai_api_key else ("gemini" if settings.gemini_api_key else ("deepseek" if settings.deepseek_api_key else "")),
+            "writer": (
+                writer_provider
+                if writer_provider != "auto"
+                else ("openai" if settings.openai_api_key else ("gemini" if settings.gemini_api_key else ("deepseek" if settings.deepseek_api_key else "")))
+            ),
             "facebook": settings.facebook_ready,
         },
     }
@@ -424,10 +429,9 @@ async def publish_now(input: DraftInput = DraftInput()):
                 raise HTTPException(400, "One or more selected assets no longer exist.")
             post = await generate_post(input.assetIds, input.angle, input.visualContext, language=input.language)
             return await asyncio.to_thread(publish_post, post["id"])
-        if input.language == "bn":
-            return await create_and_publish_bangla_post()
-        post = await generate_post([], input.angle, input.visualContext, language="en")
-        return await asyncio.to_thread(publish_post, post["id"])
+        return await create_and_publish_bangla_post(
+            language=input.language, angle=input.angle, visual_context=input.visualContext
+        )
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
 

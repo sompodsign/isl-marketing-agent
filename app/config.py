@@ -11,6 +11,7 @@ class Settings:
     environment: str = os.getenv("APP_ENV", "development")
     run_scheduler: bool = os.getenv("ENABLE_INTERNAL_SCHEDULER", "true").lower() == "true"
     dashboard_password: str = os.getenv("DASHBOARD_PASSWORD", "")
+    writer_provider: str = os.getenv("WRITER_PROVIDER", "auto").lower()
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash-0731")
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")

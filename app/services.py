@@ -17,11 +17,7 @@ from app.config import settings
 from app.database import connect, rows
 
 OFFICIAL_CONTACT_EMAIL = "contact@inarisoftlabs.com"
-PRODUCT_PAGE_URLS = {
-    "LabLink": "https://inarisoftlabs.com/products/lablink",
-    "KarbarPro": "https://inarisoftlabs.com/products/karbarpro",
-    "Shikha": "https://inarisoftlabs.com/products/shikha",
-}
+WEBSITE_URL = "www.inarisoftlabs.com"
 logger = logging.getLogger(__name__)
 
 # Number of times generate_post retries the writing model when a draft fails
@@ -209,22 +205,27 @@ def selected_product(assets: list[dict]) -> str:
     return next(iter(products), "InariSoftLabs")
 
 
-def product_page_url(product: str) -> str | None:
-    """Return the public product page configured for a generated post."""
-    return PRODUCT_PAGE_URLS.get(product)
-
-
 def add_product_page_link(caption: str, product: str) -> str:
-    """Ensure the product page is visible in the final published caption."""
-    url = product_page_url(product)
-    if not url or url in caption:
-        return caption
+    """Ensure every post shares only the canonical InariSoftLabs website."""
+    del product
+    website_pattern = re.compile(r"(?:https?://)?(?:www\.)?inarisoftlabs\.com(?:/[^\s]*)?", re.IGNORECASE)
+    lines: list[str] = []
+    link_present = False
+    for line in caption.rstrip().splitlines():
+        if not website_pattern.search(line):
+            lines.append(line)
+            continue
+        if link_present:
+            continue
+        lines.append(website_pattern.sub(WEBSITE_URL, line))
+        link_present = True
+    if link_present:
+        return "\n".join(lines)
 
-    lines = caption.rstrip().splitlines()
     hashtag_line = next((index for index in range(len(lines) - 1, -1, -1) if "#" in lines[index]), None)
     if hashtag_line is None:
-        return f"{caption.rstrip()}\n\n{url}"
-    lines.insert(hashtag_line, url)
+        return f"{caption.rstrip()}\n\n{WEBSITE_URL}"
+    lines.insert(hashtag_line, WEBSITE_URL)
     return "\n".join(lines)
 
 
@@ -288,9 +289,14 @@ def jaccard(first: str, second: str) -> float:
 
 
 async def writer_output(prompt: str) -> object:
-    """Prefer OpenAI, then Gemini, with DeepSeek retained as transition fallback."""
+    """Write through the explicitly selected provider, or use the legacy fallback order."""
+    provider = getattr(settings, "writer_provider", "auto")
+    if provider not in {"auto", "openai", "gemini", "deepseek"}:
+        raise ValueError("WRITER_PROVIDER must be auto, openai, gemini, or deepseek.")
     openai_key = getattr(settings, "openai_api_key", "")
-    if openai_key:
+    if provider == "openai" and not openai_key:
+        raise ValueError("Add OPENAI_API_KEY before using WRITER_PROVIDER=openai.")
+    if provider in {"auto", "openai"} and openai_key:
         schema = {
             "type": "object", "additionalProperties": False,
             "properties": {
@@ -335,7 +341,9 @@ async def writer_output(prompt: str) -> object:
             raise ValueError("OpenAI returned an unexpected response. Please try again.") from error
 
     gemini_key = getattr(settings, "gemini_api_key", "")
-    if gemini_key:
+    if provider == "gemini" and not gemini_key:
+        raise ValueError("Add GEMINI_API_KEY before using WRITER_PROVIDER=gemini.")
+    if provider in {"auto", "gemini"} and gemini_key:
         schema = {
             "type": "object",
             "properties": {
@@ -375,11 +383,16 @@ async def writer_output(prompt: str) -> object:
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as error:
             raise ValueError("Gemini returned an unexpected response. Please try again.") from error
 
+    deepseek_key = getattr(settings, "deepseek_api_key", "")
+    if provider == "deepseek" and not deepseek_key:
+        raise ValueError("Add DEEPSEEK_API_KEY before using WRITER_PROVIDER=deepseek.")
+    if provider == "auto" and not deepseek_key:
+        raise ValueError("Add an API key for OpenAI, Gemini, or DeepSeek before generating a post.")
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 "https://api.deepseek.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+                headers={"Authorization": f"Bearer {deepseek_key}"},
                 json={
                     "model": settings.deepseek_model,
                     "messages": [
@@ -408,7 +421,7 @@ async def generate_post(
     image_options: list[dict] | None = None,
 ) -> dict:
     if not (getattr(settings, "openai_api_key", "") or getattr(settings, "gemini_api_key", "") or getattr(settings, "deepseek_api_key", "")):
-        raise ValueError("Add OPENAI_API_KEY to .env before generating a post.")
+        raise ValueError("Add an API key for OpenAI, Gemini, or DeepSeek before generating a post.")
     if not usable_knowledge():
         raise ValueError("Add a verified product, service, audience, or case-study note before generating posts.")
     selected_assets = asset_records(asset_ids)
@@ -453,11 +466,9 @@ async def generate_post(
         if contact_cta
         else "Use a soft CTA such as asking readers to message the Page or learn more."
     )
-    product_url = product_page_url(product)
     product_link_instruction = (
-        f"Include this exact product page URL on its own line in the caption: {product_url}"
-        if product_url
-        else "Do not add a product page URL because this is a general InariSoftLabs post."
+        f"Include this exact website address on its own line in the caption: {WEBSITE_URL}. "
+        "Do not include any other website address, URL path, or product-page link."
     )
     image_instruction = ""
     if image_options:
@@ -665,7 +676,9 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
     return post
 
 
-async def create_and_publish_bangla_post() -> dict:
+async def create_and_publish_bangla_post(
+    language: str = "bn", angle: str = "", visual_context: str = ""
+) -> dict:
     candidates = image_candidates()
     products: dict[str, list[dict]] = {}
     for candidate in candidates:
@@ -673,10 +686,11 @@ async def create_and_publish_bangla_post() -> dict:
     product, product_images = random.choice(list(products.items()))
     post = await generate_post(
         [],
-        f"Create a fresh Bangla Facebook post that introduces a useful {product} workflow.",
-        f"A randomly selected {product} product screenshot is attached. Do not describe "
-        "unseen interface details; ground the post in the verified knowledge.",
-        language="bn",
+        angle or f"Create a fresh Facebook post that introduces a useful {product} workflow.",
+        visual_context
+        or (f"A randomly selected {product} product screenshot is attached. Do not describe "
+            "unseen interface details; ground the post in the verified knowledge."),
+        language=language,
         image_options=product_images,
     )
     return await asyncio.to_thread(publish_post, post["id"])

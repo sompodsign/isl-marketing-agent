@@ -319,14 +319,29 @@ def test_product_page_links_are_added_before_hashtags():
 
     assert services.add_product_page_link(caption, "LabLink") == (
         "Opening line\n\nA useful workflow for the team.\n\n"
-        "https://inarisoftlabs.com/products/lablink\n#One #Two #Three"
+        "www.inarisoftlabs.com\n#One #Two #Three"
     )
-    assert services.add_product_page_link(caption, "KarbarPro").count(
-        "https://inarisoftlabs.com/products/karbarpro"
-    ) == 1
-    assert services.add_product_page_link(caption, "Shikha").count(
-        "https://inarisoftlabs.com/products/shikha"
-    ) == 1
+    assert services.add_product_page_link(caption, "KarbarPro").count("www.inarisoftlabs.com") == 1
+    assert services.add_product_page_link(caption, "Shikha").count("www.inarisoftlabs.com") == 1
+    assert services.add_product_page_link(
+        "Learn more at https://inarisoftlabs.com/products/lablink\n\n#One",
+        "LabLink",
+    ) == "Learn more at www.inarisoftlabs.com\n\n#One"
+
+
+def test_publish_now_without_a_selected_asset_uses_an_available_image(monkeypatch):
+    captured = {}
+
+    async def fake_create(language, angle, visual_context):
+        captured.update(language=language, angle=angle, visual_context=visual_context)
+        return {"id": "published-post", "assetIds": ["image-1"]}
+
+    monkeypatch.setattr(main, "create_and_publish_bangla_post", fake_create)
+
+    result = asyncio.run(main.publish_now(main.DraftInput(language="en", angle="A useful angle")))
+
+    assert result["assetIds"] == ["image-1"]
+    assert captured == {"language": "en", "angle": "A useful angle", "visual_context": ""}
 
 
 def test_karbarpro_has_its_own_writing_example(isolated_data, monkeypatch):
