@@ -1,6 +1,14 @@
 data/state.json
 data/uploads/
 data/marketing-agent.db
+data/marketing-agent.db-shm
+data/marketing-agent.db-wal
+
+# Local environment / secrets — never commit. Template (.env.example) stays tracked.
+.env
+.env.*
+!.env.example
+
 .DS_Store
 __pycache__/
 *.py[cod]
