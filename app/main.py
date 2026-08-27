@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field, field_validator
 
@@ -127,6 +127,7 @@ class DraftInput(BaseModel):
     angle: str = Field(default="", max_length=500)
     visualContext: str = Field(default="", max_length=2000)
     language: str = Field(default="bn", max_length=5)
+    channel: str = Field(default="facebook", max_length=20)
 
 
 class AssetMetadataInput(BaseModel):
@@ -209,7 +210,7 @@ async def run_schedule_slot(config: dict, slot: str):
                 products.setdefault(asset_product(candidate) or "InariSoftLabs", []).append(candidate)
             product, product_images = random.choice(list(products.items()))
             post = await generate_post(
-                [], "", "", language=config.get("scheduleLanguage", "bn"), image_options=product_images
+                [], "", "", language=config.get("scheduleLanguage", "bn"), image_options=product_images, channel="facebook"
             )
         if config["mode"] == "auto_publish":
             await asyncio.to_thread(publish_post, post["id"])
@@ -219,6 +220,29 @@ async def run_schedule_slot(config: dict, slot: str):
                     "UPDATE posts SET scheduled_for=?, updated_at=? WHERE id=?",
                     (datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat(), post["id"]),
                 )
+        if getattr(settings, "linkedin_ready", False):
+            # Best-effort LinkedIn companion: client-facing English copy so the
+            # Company Page attracts software-development leads. A LinkedIn
+            # failure never fails the Facebook slot.
+            try:
+                linkedin_images = image_candidates()
+                linkedin_products: dict[str, list[dict]] = {}
+                for candidate in linkedin_images:
+                    linkedin_products.setdefault(asset_product(candidate) or "InariSoftLabs", []).append(candidate)
+                linkedin_product, linkedin_product_images = random.choice(list(linkedin_products.items()))
+                linkedin_post = await generate_post(
+                    [], "", "", language="en", image_options=linkedin_product_images, channel="linkedin"
+                )
+                if config["mode"] == "auto_publish":
+                    await asyncio.to_thread(publish_post, linkedin_post["id"])
+                else:
+                    with connect() as db:
+                        db.execute(
+                            "UPDATE posts SET scheduled_for=?, updated_at=? WHERE id=?",
+                            (datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat(), linkedin_post["id"]),
+                        )
+            except Exception:
+                logger.exception("Scheduled LinkedIn post failed; the Facebook slot is unaffected.")
         with connect() as db:
             db.execute("UPDATE schedule_runs SET status='succeeded', error=NULL WHERE slot=?", (slot,))
     except Exception as error:
@@ -243,6 +267,7 @@ def dashboard():
                 else ("openai" if settings.openai_api_key else ("gemini" if settings.gemini_api_key else ("deepseek" if settings.deepseek_api_key else "")))
             ),
             "facebook": settings.facebook_ready,
+            "linkedin": getattr(settings, "linkedin_ready", False),
         },
     }
 
@@ -380,13 +405,17 @@ def update_asset(asset_id: str, input: AssetMetadataInput):
 async def make_draft(input: DraftInput):
     if input.language not in {"bn", "en"}:
         raise HTTPException(400, "Choose Bengali or English for the post language.")
+    if input.channel not in {"facebook", "linkedin"}:
+        raise HTTPException(400, "Choose Facebook or LinkedIn as the posting channel.")
     if not input.assetIds:
         raise HTTPException(400, "Select one product image before generating a post.")
     existing_ids = {asset["id"] for asset in list_assets()}
     if not set(input.assetIds) <= existing_ids:
         raise HTTPException(400, "One or more selected assets no longer exist.")
     try:
-        return await generate_post(input.assetIds, input.angle, input.visualContext, language=input.language)
+        return await generate_post(
+            input.assetIds, input.angle, input.visualContext, language=input.language, channel=input.channel
+        )
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
 
@@ -427,14 +456,18 @@ async def publish_now(input: DraftInput = DraftInput()):
     try:
         if input.language not in {"bn", "en"}:
             raise HTTPException(400, "Choose Bengali or English for the post language.")
+        if input.channel not in {"facebook", "linkedin"}:
+            raise HTTPException(400, "Choose Facebook or LinkedIn as the posting channel.")
         if input.assetIds:
             existing_ids = {asset["id"] for asset in list_assets()}
             if not set(input.assetIds) <= existing_ids:
                 raise HTTPException(400, "One or more selected assets no longer exist.")
-            post = await generate_post(input.assetIds, input.angle, input.visualContext, language=input.language)
+            post = await generate_post(
+                input.assetIds, input.angle, input.visualContext, language=input.language, channel=input.channel
+            )
             return await asyncio.to_thread(publish_post, post["id"])
         return await create_and_publish_bangla_post(
-            language=input.language, angle=input.angle, visual_context=input.visualContext
+            language=input.language, angle=input.angle, visual_context=input.visualContext, channel=input.channel
         )
     except ValueError as error:
         raise HTTPException(400, str(error)) from error

@@ -110,6 +110,23 @@ def initialise() -> None:
         post_columns = {row["name"] for row in db.execute("PRAGMA table_info(posts)")}
         if "updated_at" not in post_columns:
             db.execute("ALTER TABLE posts ADD COLUMN updated_at TEXT")
+        if "channel" not in post_columns:
+            db.execute("ALTER TABLE posts ADD COLUMN channel TEXT NOT NULL DEFAULT 'facebook'")
+        if "linkedin_post_id" not in post_columns:
+            db.execute("ALTER TABLE posts ADD COLUMN linkedin_post_id TEXT")
+        # Company-level facts give LinkedIn service posts grounded positioning
+        # without inventing capabilities. Idempotent by fixed id.
+        if not db.execute("SELECT 1 FROM knowledge WHERE id='brand-services'").fetchone():
+            db.execute(
+                "INSERT INTO knowledge(id, title, body, kind, source_url, created_at, reviewed, product) VALUES (?, ?, ?, ?, ?, datetime('now'), 1, 'InariSoftLabs')",
+                (
+                    "brand-services",
+                    "InariSoftLabs software services",
+                    "InariSoftLabs designs and builds custom software for businesses: web applications, mobile apps, and management systems such as LabLink for diagnostic centers, KarbarPro for shop management, and Shikha for education management. Engagements begin with a scoped discussion of the client's workflow, followed by a proposal, build, and ongoing support. Contact: contact@inarisoftlabs.com. Website: www.inarisoftlabs.com. Only make claims supported by the knowledge library; do not invent team sizes, prices, timelines, or clients.",
+                    "brand",
+                    "https://inarisoftlabs.com",
+                ),
+            )
         schedule_columns = {row["name"] for row in db.execute("PRAGMA table_info(schedule_runs)")}
         if "status" not in schedule_columns:
             db.execute("ALTER TABLE schedule_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'succeeded'")

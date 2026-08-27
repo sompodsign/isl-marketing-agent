@@ -281,6 +281,8 @@ def list_posts() -> list[dict]:
         post["scheduledFor"] = post.pop("scheduled_for")
         post["publishedAt"] = post.pop("published_at")
         post["facebookPostId"] = post.pop("facebook_post_id")
+        post["linkedinPostId"] = post.pop("linkedin_post_id", None)
+        post["channel"] = post.pop("channel", "facebook")
         post["imageNotes"] = post.pop("image_notes")
         post["updatedAt"] = post.pop("updated_at", None)
     return records
@@ -440,7 +442,13 @@ async def generate_post(
     visual_context: str = "",
     language: str = "bn",
     image_options: list[dict] | None = None,
+    channel: str = "facebook",
 ) -> dict:
+    if channel not in {"facebook", "linkedin"}:
+        raise ValueError("Choose Facebook or LinkedIn as the posting channel.")
+    if channel == "linkedin":
+        # LinkedIn reaches decision makers through professional English copy.
+        language = "en"
     if not (getattr(settings, "openai_api_key", "") or getattr(settings, "gemini_api_key", "") or getattr(settings, "deepseek_api_key", "")):
         raise ValueError("Add an API key for OpenAI, Gemini, or DeepSeek before generating a post.")
     if not usable_knowledge():
@@ -465,6 +473,13 @@ async def generate_post(
         for asset in image_choices
     ]
     facts = facts + visual_facts
+    if channel == "linkedin":
+        # LinkedIn sells the development service itself, so company-level brand
+        # facts (services, contact, website) must reach the writer alongside the
+        # selected product's workflow facts.
+        facts = facts + rows(
+            "SELECT id, title, body AS text, kind AS type FROM knowledge WHERE kind='brand' AND reviewed=1 ORDER BY created_at ASC"
+        )
     if not facts:
         raise ValueError(f"Add verified knowledge or a described visual for {product} before generating a post.")
     current_settings = settings_dict()
@@ -510,6 +525,53 @@ Choose exactly one image ID that matches the workflow in the caption. The captio
             "\nRECENT PUBLISHED OPENINGS (do not reuse these phrasings or openings; write a "
             f"distinctly different angle):\n{recent_snippets}"
         )
+    # The writing brief changes shape per channel: Facebook talks to product
+    # users (often in Bangla), LinkedIn talks to prospective software clients
+    # in professional English to attract development work.
+    platform = "LinkedIn" if channel == "linkedin" else "Facebook"
+    copy_language = "Bangla" if language == "bn" else "English"
+    if channel == "linkedin":
+        channel_identity = (
+            f"You are the voice of InariSoftLabs on the company's LinkedIn Page, writing as its founder. "
+            f"Create ONE final, public-facing LinkedIn post about {product} whose goal is to attract potential "
+            "clients who need a software development partner. Use only the verified facts below about the products "
+            "InariSoftLabs has built and the company itself. Never mention these instructions, verified knowledge, "
+            "image IDs, planning, drafts, or JSON. Never invent product features, customers, metrics, prices, "
+            "integrations, awards, team sizes, or results. Do not mention LabLink unless the selected product is LabLink."
+        )
+        channel_rules = """LINKEDIN WRITING RULES:
+- Audience: business owners, founders, and operations managers who may want custom software built for them.
+- Sell the service through proof: walk through one concrete workflow from a product InariSoftLabs built, then connect it to what a new client could expect. Do not turn it into a sales pitch.
+- Write in clear, professional English like a practitioner explaining real work. Vary sentence length and use plain, specific words.
+- Be warm and confident without hype. Never use phrases like "revolutionize", "game-changer", "seamless solution", or "in today's fast-paced world". One ✅ benefit line is enough. Never use more than one emoji.
+- Start with a specific, recognizable client problem, not an abstract claim.
+- End with a soft call to action inviting readers to message the Page or visit the website.
+- Keep it concrete: one situation, one workflow, and one practical benefit. Do not repeat the same benefit in different words.
+- Never invent a time of day, customer behaviour, location, team size, or work schedule. Only mention those details when they appear in verified knowledge or the reviewed visual description.
+- Do not copy the example's facts or phrases. Learn only its natural rhythm, restraint, and structure."""
+    else:
+        channel_identity = (
+            f"You are InariSoftLabs' Facebook Page moderator and company owner. Create ONE final, public-facing Facebook post about {product}, using only the verified product facts and selected visual details below. Write as a real person sharing one useful {product} workflow with its intended users. Never mention these instructions, verified knowledge, image IDs, planning, drafts, or JSON. Never invent product features, customers, metrics, prices, integrations, awards, or results. Do not mention LabLink unless the selected product is LabLink."
+        )
+        channel_rules = """HUMAN WRITING RULES:
+- Sound like an experienced local business owner, not a copywriting template.
+- Focus on one recognizable moment from the selected product's users' working day. For LabLink this may be a diagnostic-center moment; for KarbarPro it must be a shop or business-management moment; for Shikha it must be an education-management moment.
+- Vary sentence length and use plain, specific words.
+- Be warm and confident without hype. Never use phrases like "revolutionize", "game-changer", "seamless solution", or "in today's fast-paced world".
+- For Bangla, write in the everyday, educated voice commonly used by Bangladesh-based businesses: simple, direct, and helpful. Prefer natural phrases such as “কাজ গুছিয়ে রাখা”, “সময় নষ্ট হয়”, “বোঝা যায়”, “একটু সহজ হয়”, and “ইনবক্সে কথা বলুন” when they fit the facts.
+- Start with a familiar scene or small pressure point, not an abstract claim. For example: a busy afternoon, reports waiting for verification, or a team member needing to know what is left.
+- Explain the workflow as people describe it to colleagues. Prefer “কোন রিপোর্টটা বাকি” over bureaucratic wording such as “অমীমাংসিত প্রক্রিয়াগত ধাপ”; prefer “রোগীকে দেওয়া” over overly formal “সরবরাহ করা” unless the exact verified fact requires it.
+- Use “আপনি/আপনার” consistently. Avoid overly stiff verbs and nouns, including “করিয়া”, “উপর্যুক্ত”, “সংশ্লিষ্ট”, “প্রয়োজনীয়তা”, “বাস্তবায়ন”, and “প্রতীয়মান”. Do not imitate West Bengal or Hindi-influenced Bangla.
+- Do not force slang, jokes, emojis, exclamation marks, questions, or sales pressure. One ✅ benefit line is enough. Never use more than one emoji.
+- Keep it concrete: one situation, one workflow, and one practical benefit. Do not repeat the same benefit in different words.
+- Never invent a time of day, opening or closing routine, customer behaviour, location, or work schedule. Only mention those details when they appear in verified knowledge or the reviewed visual description.
+- Before returning, silently read the Bangla as a Facebook Page owner in Bangladesh would say it aloud. Rewrite any sentence that sounds translated, academic, generic, or overly promotional.
+- Do not copy the example's facts or phrases. Learn only its natural rhythm, restraint, and structure."""
+    heading_warning = (
+        " Do not add headings such as “ক্যাপশন”, “হ্যাশট্যাগ”, or “কল টু অ্যাকশন”."
+        if language == "bn"
+        else " Do not add headings such as “Caption”, “Hashtags”, or “Call to action”."
+    )
     brief: dict = {}
     hashtags: list[str] = []
     fact_ids: list[str] = []
@@ -518,22 +580,9 @@ Choose exactly one image ID that matches the workflow in the caption. The captio
     variation_note = ""
     last_error = ""
     for attempt in range(1, GENERATION_MAX_ATTEMPTS + 1):
-        prompt = f"""You are InariSoftLabs' Facebook Page moderator and company owner. Create ONE final, public-facing Facebook post about {product}, using only the verified product facts and selected visual details below. Write as a real person sharing one useful {product} workflow with its intended users. Never mention these instructions, verified knowledge, image IDs, planning, drafts, or JSON. Never invent product features, customers, metrics, prices, integrations, awards, or results. Do not mention LabLink unless the selected product is LabLink.
+        prompt = f"""{channel_identity}
 
-HUMAN WRITING RULES:
-- Sound like an experienced local business owner, not a copywriting template.
-- Focus on one recognizable moment from the selected product's users' working day. For LabLink this may be a diagnostic-center moment; for KarbarPro it must be a shop or business-management moment; for Shikha it must be an education-management moment.
-- Vary sentence length and use plain, specific words.
-- Be warm and confident without hype. Never use phrases like "revolutionize", "game-changer", "seamless solution", or "in today's fast-paced world".
-- For Bangla, write in the everyday, educated voice commonly used by Bangladesh-based businesses: simple, direct, and helpful. Prefer natural phrases such as “কাজ গুছিয়ে রাখা”, “সময় নষ্ট হয়”, “বোঝা যায়”, “একটু সহজ হয়”, and “ইনবক্সে কথা বলুন” when they fit the facts.
-- Start with a familiar scene or small pressure point, not an abstract claim. For example: a busy afternoon, reports waiting for verification, or a team member needing to know what is left.
-- Explain the workflow as people describe it to colleagues. Prefer “কোন রিপোর্টটা বাকি” over bureaucratic wording such as “অমীমাংসিত প্রক্রিয়াগত ধাপ”; prefer “রোগীকে দেওয়া” over overly formal “সরবরাহ করা” unless the exact verified fact requires it.
-- Use “আপনি/আপনার” consistently. Avoid overly stiff verbs and nouns, including “করিয়া”, “উপর্যুক্ত”, “সংশ্লিষ্ট”, “প্রয়োজনীয়তা”, “বাস্তবায়ন”, and “প্রতীয়মান”. Do not imitate West Bengal or Hindi-influenced Bangla.
-- Do not force slang, jokes, emojis, exclamation marks, questions, or sales pressure. One ✅ benefit line is enough. Never use more than one emoji.
-- Keep it concrete: one situation, one workflow, and one practical benefit. Do not repeat the same benefit in different words.
-- Never invent a time of day, opening or closing routine, customer behaviour, location, or work schedule. Only mention those details when they appear in verified knowledge or the reviewed visual description.
-- Before returning, silently read the Bangla as a Facebook Page owner in Bangladesh would say it aloud. Rewrite any sentence that sounds translated, academic, generic, or overly promotional.
-- Do not copy the example's facts or phrases. Learn only its natural rhythm, restraint, and structure.
+{channel_rules}
 
 STYLE EXAMPLE:
 <example>
@@ -563,9 +612,9 @@ Use this exact visible structure inside the caption field:
 5. A blank line, then a natural call to action and the optional contact CTA if provided.
 6. A blank line, then one final line containing 3-5 relevant hashtags in the requested language.
 
-The caption field must contain the complete final Facebook post, including the CTA and hashtags exactly as it should be published. Do not add headings such as “ক্যাপশন”, “হ্যাশট্যাগ”, or “কল টু অ্যাকশন”.
+The caption field must contain the complete final {platform} post, including the CTA and hashtags exactly as it should be published.{heading_warning}
 
-Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay text","cta":"Bangla CTA already included in caption","hashtags":["Bangla hashtags already included in caption"],"imageNotes":"Bangla description of how selected imagery supports the copy","selectedAssetId":"image ID or empty string","confidence":"high|medium|low","factIds":["verified ids used"]}}. Caption must be 80-220 words and use no more than 5 hashtags."""
+Return JSON only: {{"caption":"...","headline":"short optional {copy_language} overlay text","cta":"{copy_language} CTA already included in caption","hashtags":["{copy_language} hashtags already included in caption"],"imageNotes":"{copy_language} description of how selected imagery supports the copy","selectedAssetId":"image ID or empty string","confidence":"high|medium|low","factIds":["verified ids used"]}}. Caption must be 80-220 words and use no more than 5 hashtags."""
         model_output = await writer_output(prompt)
         try:
             brief = parse_json(model_output)
@@ -660,6 +709,8 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
         "scheduledFor": None,
         "publishedAt": None,
         "facebookPostId": None,
+        "linkedinPostId": None,
+        "channel": channel,
         "error": None,
         "updatedAt": None,
     }
@@ -668,8 +719,9 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
             """INSERT INTO posts (
                 id, status, caption, headline, cta, hashtags_json, image_notes,
                 confidence, fact_ids_json, asset_ids_json, created_at,
-                scheduled_for, published_at, facebook_post_id, error, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                scheduled_for, published_at, facebook_post_id, linkedin_post_id,
+                channel, error, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 post["id"],
                 post["status"],
@@ -686,6 +738,8 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
                 None,
                 None,
                 None,
+                channel,
+                None,
                 None,
             ),
         )
@@ -694,13 +748,19 @@ Return JSON only: {{"caption":"...","headline":"short optional Bangla overlay te
 
 
 async def create_and_publish_bangla_post(
-    language: str = "bn", angle: str = "", visual_context: str = ""
+    language: str = "bn", angle: str = "", visual_context: str = "", channel: str = "facebook"
 ) -> dict:
     candidates = image_candidates()
     products: dict[str, list[dict]] = {}
     for candidate in candidates:
         products.setdefault(asset_product(candidate) or "InariSoftLabs", []).append(candidate)
     product, product_images = random.choice(list(products.items()))
+    if channel == "linkedin":
+        language = "en"
+        angle = angle or (
+            f"Position InariSoftLabs as a custom software development partner by walking through "
+            f"one concrete {product} workflow the team built."
+        )
     post = await generate_post(
         [],
         angle or f"Create a fresh Facebook post that introduces a useful {product} workflow.",
@@ -709,6 +769,7 @@ async def create_and_publish_bangla_post(
             "unseen interface details; ground the post in the verified knowledge."),
         language=language,
         image_options=product_images,
+        channel=channel,
     )
     return await asyncio.to_thread(publish_post, post["id"])
 
@@ -770,14 +831,100 @@ def _facebook_error_details(error: Exception) -> dict:
     return details
 
 
+LINKEDIN_API_BASE = "https://api.linkedin.com"
+
+
+def _linkedin_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {settings.linkedin_token}",
+        "LinkedIn-Version": settings.linkedin_api_version,
+        "X-Restli-Protocol-Version": "2.0.0",
+        "Content-Type": "application/json",
+    }
+
+
+def _linkedin_json_request(url: str, payload: dict) -> tuple[dict, dict]:
+    request = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST", headers=_linkedin_headers())
+    with urllib.request.urlopen(request, timeout=30) as response:
+        headers = {key.lower(): value for key, value in response.headers.items()}
+        body = response.read()
+        parsed = json.loads(body) if body.strip() else {}
+        return parsed, headers
+
+
+def _linkedin_register_image_upload(author: str) -> dict:
+    """Reserve a LinkedIn media asset and return its upload URL and asset URN."""
+    payload = {
+        "registerUploadRequest": {
+            "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+            "owner": author,
+            "serviceRelationships": [{"relationshipType": "OWNER", "identifier": "urn:li:userGeneratedContent"}],
+        }
+    }
+    body, _ = _linkedin_json_request(f"{LINKEDIN_API_BASE}/rest/uploads?action=registerUpload", payload)
+    value = body.get("value") if isinstance(body.get("value"), dict) else body
+    upload_url = value.get("uploadUrl")
+    asset = value.get("asset")
+    if not upload_url or not asset:
+        raise ValueError("LinkedIn did not return an image upload location. Check the server logs.")
+    return {"uploadUrl": upload_url, "asset": asset}
+
+
+def _linkedin_upload_image(upload_url: str, file_path: str, mime_type: str) -> None:
+    """Upload the image bytes to the pre-authorized URL (no auth header on purpose)."""
+    request = urllib.request.Request(
+        upload_url, data=Path(file_path).read_bytes(), method="PUT", headers={"Content-Type": mime_type}
+    )
+    with urllib.request.urlopen(request, timeout=120):
+        return None
+
+
+def _linkedin_create_post(author: str, commentary: str, media_urn: str | None) -> str:
+    """Create a LinkedIn feed post and return its URN from the response headers."""
+    payload: dict = {
+        "author": author,
+        "commentary": commentary,
+        "visibility": "PUBLIC",
+        "distribution": {"feedDistribution": "MAIN_FEED", "targetEntities": [], "thirdPartyDistributionChannels": []},
+        "lifecycleState": "PUBLISHED",
+        "isReshareDisabledByAuthor": False,
+    }
+    if media_urn:
+        payload["content"] = {"media": {"id": media_urn}}
+    body, headers = _linkedin_json_request(f"{LINKEDIN_API_BASE}/rest/posts", payload)
+    return headers.get("x-restli-id") or headers.get("x-linkedin-id") or str(body.get("id") or "")
+
+
+def _linkedin_error_details(error: Exception) -> dict:
+    """Extract LinkedIn API error details without exposing access tokens in logs."""
+    details = {"exception": type(error).__name__}
+    if not isinstance(error, urllib.error.HTTPError):
+        return details
+    details["httpStatus"] = error.code
+    try:
+        payload = json.loads(error.read().decode("utf-8", errors="replace"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return details
+    if not isinstance(payload, dict):
+        return details
+    for source, target in (("message", "apiMessage"), ("status", "apiStatus"), ("serviceErrorCode", "serviceErrorCode")):
+        value = payload.get(source)
+        if value is not None:
+            details[target] = str(value)[:500]
+    return details
+
+
 def publish_post(post_id: str) -> dict:
-    if not settings.facebook_ready:
-        raise ValueError("Facebook is not configured. Set Page ID, Page token, and Graph API version in .env.")
     post = next((item for item in list_posts() if item["id"] == post_id), None)
     if not post:
         raise ValueError("Post not found.")
     if post["status"] == "published":
         return post
+    is_linkedin = post.get("channel") == "linkedin"
+    if is_linkedin and not settings.linkedin_ready:
+        raise ValueError("LinkedIn is not configured. Set LINKEDIN_ACCESS_TOKEN and LINKEDIN_AUTHOR_URN in .env.")
+    if not is_linkedin and not settings.facebook_ready:
+        raise ValueError("Facebook is not configured. Set Page ID, Page token, and Graph API version in .env.")
     if not post["assetIds"]:
         raise ValueError("Select one product image before publishing.")
     with connect() as db:
@@ -790,51 +937,73 @@ def publish_post(post_id: str) -> dict:
     assets = asset_records(post["assetIds"])
     if not assets:
         raise ValueError("The selected product image no longer exists. Choose another image before publishing.")
+    images = [asset for asset in assets if asset["mimeType"].startswith("image/")]
+    if is_linkedin and not images:
+        error_message = "LinkedIn publishing currently supports image posts only. Select a product screenshot."
+        with connect() as db:
+            db.execute("UPDATE posts SET status='failed', error=?, updated_at=? WHERE id=?", (error_message, now(), post_id))
+        log_post_event(post_id, "publishing_failed", error_message, "error")
+        raise ValueError(error_message)
     product = selected_product(assets) if assets else "InariSoftLabs"
     original_caption = post["caption"]
     post["caption"] = add_product_page_link(post["caption"], product)
     if post["caption"] != original_caption:
         with connect() as db:
             db.execute("UPDATE posts SET caption=?, updated_at=? WHERE id=?", (post["caption"], now(), post_id))
-    log_post_event(post_id, "publishing_started", "Publishing to Facebook started.")
+    log_post_event(post_id, "publishing_started", "Publishing to LinkedIn started." if is_linkedin else "Publishing to Facebook started.")
     try:
-        endpoint = f"https://graph.facebook.com/{settings.facebook_version}/{settings.facebook_page_id}/feed"
-        images = [asset for asset in assets if asset["mimeType"].startswith("image/")]
-        videos = [asset for asset in assets if asset["mimeType"].startswith("video/")]
-        if videos:
-            # Facebook video posts accept a description and a binary source in one request.
-            result = _facebook_multipart(
-                f"https://graph.facebook.com/{settings.facebook_version}/{settings.facebook_page_id}/videos",
-                {"access_token": settings.facebook_token, "description": post["caption"]},
-                videos[0]["path"],
-                videos[0]["mimeType"],
-            )
-        elif images:
-            uploaded = []
-            for asset in images[:10]:
-                photo = _facebook_multipart(
-                    f"https://graph.facebook.com/{settings.facebook_version}/{settings.facebook_page_id}/photos",
-                    {"access_token": settings.facebook_token, "published": "false"},
-                    asset["path"],
-                    asset["mimeType"],
+        if is_linkedin:
+            author = settings.linkedin_author
+            registration = _linkedin_register_image_upload(author)
+            _linkedin_upload_image(registration["uploadUrl"], images[0]["path"], images[0]["mimeType"])
+            linkedin_post_id = _linkedin_create_post(author, post["caption"], registration["asset"])
+            with connect() as db:
+                db.execute(
+                    "UPDATE posts SET status='published', published_at=?, linkedin_post_id=?, error=NULL, updated_at=? WHERE id=?",
+                    (now(), linkedin_post_id, now(), post_id),
                 )
-                uploaded.append(photo["id"])
-            payload = {"message": post["caption"], "access_token": settings.facebook_token}
-            for index, image_id in enumerate(uploaded):
-                payload[f"attached_media[{index}]"] = json.dumps({"media_fbid": image_id})
-            result = _facebook_request(endpoint, payload)
+            log_post_event(post_id, "published", "LinkedIn accepted the post.", details={"linkedinPostId": linkedin_post_id})
         else:
-            result = _facebook_request(endpoint, {"message": post["caption"], "access_token": settings.facebook_token})
-        with connect() as db:
-            db.execute(
-                "UPDATE posts SET status='published', published_at=?, facebook_post_id=?, error=NULL, updated_at=? WHERE id=?",
-                (now(), result.get("id"), now(), post_id),
-            )
-        log_post_event(post_id, "published", "Facebook accepted the post.", details={"facebookPostId": result.get("id")})
+            endpoint = f"https://graph.facebook.com/{settings.facebook_version}/{settings.facebook_page_id}/feed"
+            videos = [asset for asset in assets if asset["mimeType"].startswith("video/")]
+            if videos:
+                # Facebook video posts accept a description and a binary source in one request.
+                result = _facebook_multipart(
+                    f"https://graph.facebook.com/{settings.facebook_version}/{settings.facebook_page_id}/videos",
+                    {"access_token": settings.facebook_token, "description": post["caption"]},
+                    videos[0]["path"],
+                    videos[0]["mimeType"],
+                )
+            elif images:
+                uploaded = []
+                for asset in images[:10]:
+                    photo = _facebook_multipart(
+                        f"https://graph.facebook.com/{settings.facebook_version}/{settings.facebook_page_id}/photos",
+                        {"access_token": settings.facebook_token, "published": "false"},
+                        asset["path"],
+                        asset["mimeType"],
+                    )
+                    uploaded.append(photo["id"])
+                payload = {"message": post["caption"], "access_token": settings.facebook_token}
+                for index, image_id in enumerate(uploaded):
+                    payload[f"attached_media[{index}]"] = json.dumps({"media_fbid": image_id})
+                result = _facebook_request(endpoint, payload)
+            else:
+                result = _facebook_request(endpoint, {"message": post["caption"], "access_token": settings.facebook_token})
+            with connect() as db:
+                db.execute(
+                    "UPDATE posts SET status='published', published_at=?, facebook_post_id=?, error=NULL, updated_at=? WHERE id=?",
+                    (now(), result.get("id"), now(), post_id),
+                )
+            log_post_event(post_id, "published", "Facebook accepted the post.", details={"facebookPostId": result.get("id")})
     except Exception as error:
-        error_details = _facebook_error_details(error)
-        logger.exception("Facebook publishing failed for post %s: %s", post_id, error_details)
-        public_error = "Facebook rejected or could not complete the request. Check the server logs."
+        error_details = _linkedin_error_details(error) if is_linkedin else _facebook_error_details(error)
+        logger.exception("%s publishing failed for post %s: %s", "LinkedIn" if is_linkedin else "Facebook", post_id, error_details)
+        public_error = (
+            "LinkedIn rejected or could not complete the request. Check the server logs."
+            if is_linkedin
+            else "Facebook rejected or could not complete the request. Check the server logs."
+        )
         with connect() as db:
                 db.execute(
                 "UPDATE posts SET status='failed', error=?, updated_at=? WHERE id=?", (public_error, now(), post_id)

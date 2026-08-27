@@ -25,21 +25,35 @@ def isolated_data(tmp_path, monkeypatch):
             dashboard_password="",
             deepseek_api_key="",
             facebook_ready=False,
+            linkedin_ready=False,
         ),
     )
     database.initialise()
     return tmp_path
 
 
-def insert_draft(caption="A useful, reviewable Facebook caption for a diagnostic center team."):
+def insert_asset(asset_id="asset-1", product="LabLink", mime_type="image/png"):
+    with database.connect() as db:
+        db.execute(
+            "INSERT INTO assets (id, original_name, mime_type, path, label, description, product, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (asset_id, "shot.png", mime_type, "unused-path", f"{product} — Shot", "A visible workflow", product, services.now()),
+        )
+    return asset_id
+
+
+def insert_draft(
+    caption="A useful, reviewable Facebook caption for a diagnostic center team.",
+    asset_ids=(),
+    channel="facebook",
+):
     post_id = "post-1"
     with database.connect() as db:
         db.execute(
             """INSERT INTO posts (
                 id, status, caption, headline, cta, hashtags_json, image_notes,
-                confidence, fact_ids_json, asset_ids_json, created_at
-            ) VALUES (?, 'draft', ?, '', '', '[]', '', 'high', '[]', '[]', ?)""",
-            (post_id, caption, services.now()),
+                confidence, fact_ids_json, asset_ids_json, created_at, channel
+            ) VALUES (?, 'draft', ?, '', '', '[]', '', 'high', '[]', ?, ?, ?)""",
+            (post_id, caption, json.dumps(list(asset_ids)), services.now(), channel),
         )
     return post_id
 
@@ -92,6 +106,7 @@ def test_scheduler_runs_a_slot_crossed_between_ten_minute_checks():
 
 
 def test_scheduler_uses_configured_language_for_generated_post(isolated_data, monkeypatch):
+    insert_asset()
     captured = {}
 
     async def fake_generation(*args, **kwargs):
@@ -107,6 +122,45 @@ def test_scheduler_uses_configured_language_for_generated_post(isolated_data, mo
     )
 
     assert captured["language"] == "en"
+    assert captured["channel"] == "facebook"
+
+
+def test_scheduler_creates_a_linkedin_companion_when_configured(isolated_data, monkeypatch):
+    insert_asset()
+    captured = []
+
+    async def fake_generation(*args, **kwargs):
+        captured.append(kwargs)
+        post_id = f"generated-{len(captured)}"
+        with database.connect() as db:
+            db.execute(
+                "INSERT INTO posts (id, status, caption, headline, cta, hashtags_json, image_notes, confidence, fact_ids_json, asset_ids_json, created_at, channel) VALUES (?, 'draft', 'caption', '', '', '[]', '', 'high', '[]', '[]', ?, ?)",
+                (post_id, services.now(), kwargs.get("channel", "facebook")),
+            )
+        return {"id": post_id}
+
+    monkeypatch.setattr(
+        main,
+        "settings",
+        SimpleNamespace(
+            production=False,
+            dashboard_password="",
+            facebook_ready=True,
+            linkedin_ready=True,
+        ),
+    )
+    monkeypatch.setattr(main, "generate_post", fake_generation)
+    asyncio.run(
+        main.run_schedule_slot(
+            {"mode": "approval", "scheduleLanguage": "bn"},
+            "2026-08-08-10:00",
+        )
+    )
+
+    assert [call["channel"] for call in captured] == ["facebook", "linkedin"]
+    assert captured[1]["language"] == "en"
+    scheduled = [post["channel"] for post in services.list_posts() if post["scheduledFor"]]
+    assert sorted(scheduled) == ["facebook", "linkedin"]
 
 
 def test_upload_checks_file_signature(isolated_data):
@@ -121,7 +175,8 @@ def test_upload_checks_file_signature(isolated_data):
 
 
 def test_publish_is_idempotent(isolated_data, monkeypatch):
-    post_id = insert_draft()
+    insert_asset()
+    post_id = insert_draft(asset_ids=("asset-1",))
     fake_settings = SimpleNamespace(
         facebook_ready=True,
         facebook_version="v1.0",
@@ -131,10 +186,14 @@ def test_publish_is_idempotent(isolated_data, monkeypatch):
     monkeypatch.setattr(services, "settings", fake_settings)
     calls = []
 
+    def fake_multipart(url, fields, file_path, mime_type, field_name="source"):
+        return {"id": "photo-1"}
+
     def fake_request(url, data):
         calls.append((url, data))
         return {"id": "facebook-1"}
 
+    monkeypatch.setattr(services, "_facebook_multipart", fake_multipart)
     monkeypatch.setattr(services, "_facebook_request", fake_request)
     first = services.publish_post(post_id)
     second = services.publish_post(post_id)
@@ -142,6 +201,67 @@ def test_publish_is_idempotent(isolated_data, monkeypatch):
     assert first["status"] == "published"
     assert second["facebookPostId"] == "facebook-1"
     assert len(calls) == 1
+
+
+def test_linkedin_publish_uploads_image_and_creates_post(isolated_data, monkeypatch):
+    insert_asset()
+    post_id = insert_draft(asset_ids=("asset-1",), channel="linkedin")
+    fake_settings = SimpleNamespace(
+        linkedin_ready=True,
+        linkedin_token="token",
+        linkedin_author="urn:li:organization:123",
+        linkedin_api_version="202506",
+    )
+    monkeypatch.setattr(services, "settings", fake_settings)
+    registrations, uploads, created = [], [], []
+
+    def fake_register(author):
+        registrations.append(author)
+        return {"uploadUrl": "https://upload.example.com/asset", "asset": "urn:li:digitalmediaAsset:555"}
+
+    def fake_upload(url, path, mime_type):
+        uploads.append((url, path, mime_type))
+
+    def fake_create(author, commentary, media_urn):
+        created.append((author, commentary, media_urn))
+        return "urn:li:share:999"
+
+    monkeypatch.setattr(services, "_linkedin_register_image_upload", fake_register)
+    monkeypatch.setattr(services, "_linkedin_upload_image", fake_upload)
+    monkeypatch.setattr(services, "_linkedin_create_post", fake_create)
+
+    first = services.publish_post(post_id)
+    second = services.publish_post(post_id)
+
+    assert registrations == ["urn:li:organization:123"]
+    assert uploads and uploads[0][2] == "image/png"
+    assert created and created[0][2] == "urn:li:digitalmediaAsset:555"
+    assert first["status"] == "published"
+    assert first["linkedinPostId"] == "urn:li:share:999"
+    assert second["linkedinPostId"] == "urn:li:share:999"
+    assert len(created) == 1, "publishing twice must not create a second LinkedIn post"
+
+
+def test_linkedin_publish_requires_configuration(isolated_data, monkeypatch):
+    insert_asset()
+    post_id = insert_draft(asset_ids=("asset-1",), channel="linkedin")
+    monkeypatch.setattr(services, "settings", SimpleNamespace(linkedin_ready=False))
+    with pytest.raises(ValueError, match="LinkedIn is not configured"):
+        services.publish_post(post_id)
+
+
+def test_linkedin_publish_rejects_video_assets(isolated_data, monkeypatch):
+    insert_asset(mime_type="video/mp4")
+    post_id = insert_draft(asset_ids=("asset-1",), channel="linkedin")
+    monkeypatch.setattr(
+        services,
+        "settings",
+        SimpleNamespace(linkedin_ready=True, linkedin_token="token", linkedin_author="urn:li:organization:1", linkedin_api_version="202506"),
+    )
+    with pytest.raises(ValueError, match="image posts only"):
+        services.publish_post(post_id)
+    statuses = {post["id"]: post["status"] for post in services.list_posts()}
+    assert statuses[post_id] == "failed"
 
 
 def test_draft_can_be_edited_before_publish(isolated_data):
@@ -223,6 +343,80 @@ def test_generation_uses_human_example_and_validates_facts(isolated_data, monkey
     assert "silently read the Bangla" in prompt
     assert "Never invent a time of day" in prompt
     assert post["factIds"] == ["fact-1"]
+
+
+def test_linkedin_generation_uses_professional_english_prompt(isolated_data, monkeypatch):
+    with database.connect() as db:
+        db.execute(
+            "INSERT INTO knowledge(id, title, body, kind, source_url, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "fact-1",
+                "Report workflow",
+                "LabLink keeps report work in draft, verified, and delivered stages for center teams.",
+                "workflow",
+                None,
+                services.now(),
+            ),
+        )
+    words = ["reliable"] * 90
+    caption = "Clinics lose hours chasing report status\n\n" + " ".join(words) + "\n\n#SoftwareDevelopment #CustomSoftware #LabLink"
+    response_payload = {
+        "caption": caption,
+        "headline": "Report workflow",
+        "cta": "Message us",
+        "hashtags": ["#SoftwareDevelopment", "#CustomSoftware", "#LabLink"],
+        "imageNotes": "",
+        "selectedAssetId": "",
+        "confidence": "high",
+        "factIds": ["fact-1"],
+    }
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"choices": [{"message": {"content": json.dumps(response_payload)}}]}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, **kwargs):
+            captured.update(kwargs["json"])
+            return FakeResponse()
+
+    monkeypatch.setattr(services.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(services, "settings", SimpleNamespace(deepseek_api_key="key", deepseek_model="model"))
+
+    post = asyncio.run(services.generate_post([], "report workflow", channel="linkedin"))
+    prompt = captured["messages"][1]["content"]
+    assert "LINKEDIN WRITING RULES" in prompt
+    assert "software development partner" in prompt
+    assert "HUMAN WRITING RULES" not in prompt
+    assert "silently read the Bangla" not in prompt
+    assert "complete final LinkedIn post" in prompt
+    assert "brand-services" in prompt, "company service facts must ground LinkedIn copy"
+    assert post["channel"] == "linkedin"
+
+
+def test_generation_rejects_unknown_channel(isolated_data, monkeypatch):
+    monkeypatch.setattr(services, "settings", SimpleNamespace(deepseek_api_key="key", deepseek_model="model"))
+    with pytest.raises(ValueError, match="Choose Facebook or LinkedIn"):
+        asyncio.run(services.generate_post([], "angle", channel="twitter"))
+
+
+def test_api_rejects_unknown_channel(isolated_data):
+    with TestClient(main.app) as client:
+        response = client.post("/api/posts/generate", json={"assetIds": ["asset-1"], "channel": "twitter"})
+    assert response.status_code == 400
+    assert "Facebook or LinkedIn" in response.json()["detail"]
 
 
 def test_generate_post_retries_when_draft_is_too_similar(isolated_data, monkeypatch):
@@ -342,8 +536,9 @@ def test_website_link_normalization_does_not_change_contact_email():
     )
 
 
-def test_publish_rejects_post_without_an_image(isolated_data):
+def test_publish_rejects_post_without_an_image(isolated_data, monkeypatch):
     post_id = insert_draft()
+    monkeypatch.setattr(services, "settings", SimpleNamespace(facebook_ready=True, linkedin_ready=False))
     with pytest.raises(ValueError, match="Select one product image"):
         services.publish_post(post_id)
 
@@ -351,8 +546,8 @@ def test_publish_rejects_post_without_an_image(isolated_data):
 def test_publish_now_without_a_selected_asset_uses_an_available_image(monkeypatch):
     captured = {}
 
-    async def fake_create(language, angle, visual_context):
-        captured.update(language=language, angle=angle, visual_context=visual_context)
+    async def fake_create(language, angle, visual_context, channel="facebook"):
+        captured.update(language=language, angle=angle, visual_context=visual_context, channel=channel)
         return {"id": "published-post", "assetIds": ["image-1"]}
 
     monkeypatch.setattr(main, "create_and_publish_bangla_post", fake_create)
@@ -360,7 +555,7 @@ def test_publish_now_without_a_selected_asset_uses_an_available_image(monkeypatc
     result = asyncio.run(main.publish_now(main.DraftInput(language="en", angle="A useful angle")))
 
     assert result["assetIds"] == ["image-1"]
-    assert captured == {"language": "en", "angle": "A useful angle", "visual_context": ""}
+    assert captured == {"language": "en", "angle": "A useful angle", "visual_context": "", "channel": "facebook"}
 
 
 def test_karbarpro_has_its_own_writing_example(isolated_data, monkeypatch):
@@ -379,7 +574,9 @@ def test_karbarpro_has_its_own_writing_example(isolated_data, monkeypatch):
         def __init__(self, **kwargs): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *args): return None
-        async def post(self, url, **kwargs): captured.update(kwargs["json"]); return FakeResponse()
+        async def post(self, url, **kwargs):
+            captured.update(kwargs["json"])
+            return FakeResponse()
 
     monkeypatch.setattr(services.httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr(services, "settings", SimpleNamespace(deepseek_api_key="key", deepseek_model="model"))
@@ -412,6 +609,7 @@ def test_unreviewed_imports_are_not_retrieved(isolated_data):
 
 
 def test_failed_schedule_can_be_retried(isolated_data, monkeypatch):
+    insert_asset()
     posting_time = datetime.now(ZoneInfo("Asia/Dhaka")).strftime("%H:%M")
     with database.connect() as db:
         db.execute("INSERT OR REPLACE INTO settings VALUES ('enabled', 'true')")

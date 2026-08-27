@@ -1,102 +1,135 @@
-# InariSoftLabs Marketing Agent
+# EvaBoot Job Application — 5-Minute Agentic Project Walkthrough
 
-A self-hosted Python dashboard that turns verified business knowledge and your product visuals into reviewable Facebook drafts, then publishes them on a configurable schedule.
+## Recommendation
 
-## Why no vector database yet?
+Use **ISL Marketing Agent** as the main project and stay with it for almost the entire five minutes.
 
-The first version uses SQLite with FTS5 full-text search. Your source material is likely a compact set of product descriptions, target audiences, testimonials, and case studies. FTS5 makes retrieval fast, local, auditable, and easy to correct—without the operational burden or opaque matches of a vector database.
+It fits the prompt better than SpeakingDude because it is clearly an agent: it retrieves knowledge, selects context, generates content, evaluates its output through deterministic checks, retries with feedback, requests human approval, schedules work, publishes externally, and records events.
 
-Add a vector database only when you have a large, messy corpus (hundreds or thousands of pages), many semantically similar documents, or want cross-document question answering. At that point, use **Postgres + pgvector** if this app already has Postgres, or **Qdrant** for a dedicated retrieval service. Keep the existing SQLite/SQL facts as the source of truth; semantic retrieval should augment—not replace—the fact checks.
+SpeakingDude is an impressive AI application, but explaining both architectures in five minutes would feel rushed. Mention SpeakingDude briefly near the end as the larger project where the same lessons are being applied.
 
-## Run it
+## Five-Minute Recording Script
 
-```bash
-cp .env.example .env
-python3 -m pip install -r requirements.txt
-python3 run.py
-```
+### 0:00–0:30 — Show the Running Dashboard
 
-Open `http://localhost:8000`. Set `DASHBOARD_PASSWORD` before exposing it to the internet; sign in with username `admin`.
+> Hi, I’m Shampad. This is the InariSoftLabs Marketing Agent, a Python application I built to generate and publish Facebook content for several software products.
+>
+> I built it because using a general chatbot for marketing created three problems: it could invent product features, produce Bangla that sounded translated or overly corporate, and repeat similar posts. I wanted an agentic workflow that could operate independently, but only inside clearly defined boundaries.
 
-## First-use checklist
+### 0:30–1:15 — Show the Project Tree, Then `app/main.py`
 
-1. Add verified information in **Knowledge**—products, ideal customers, supported outcomes, case studies, and calls to action.
-2. Upload product screenshots or videos. Select these assets for the final Facebook post. DeepSeek's current API models are text-only, so describe the visible workflow in the **Visual context** box; this stops the writer guessing visual details. For videos, a representative screenshot is still useful for review and creative direction.
-3. Set one writing-provider API key for draft creation and choose it with `WRITER_PROVIDER` (`openai`, `gemini`, or `deepseek`). The default `auto` setting uses OpenAI, then Gemini, then DeepSeek. Set `WRITER_PROVIDER=deepseek` to use DeepSeek even when the other keys are present. Screenshots are not sent to any writing model—only their reviewed labels and descriptions are used.
-4. Add Facebook Page settings to `.env`: Page ID, Page access token, and the Meta Graph API version enabled in your Meta app.
-5. Start in **Review every draft** mode. Once you trust the outputs, choose a 1×, 2×, or 3× daily cadence and explicitly enable automatic publishing.
+> The architecture is intentionally simple.
+>
+> There is a browser dashboard, a FastAPI backend, SQLite for knowledge and workflow state, several supported model providers, and Facebook’s Graph API as the external action.
+>
+> `main.py` handles the HTTP endpoints, authentication, scheduling, and application lifecycle. `services.py` contains the generation workflow, retrieval, validation, provider integrations, and publishing logic.
+>
+> I avoided introducing a large agent framework because this workflow did not need one. Keeping the orchestration in normal Python makes every state transition inspectable and testable.
 
-### Make the writing sound like you
+Briefly point to:
 
-The cadence form accepts one or two optional **Human writing examples**. Paste posts
-whose rhythm, restraint, and vocabulary feel right for InariSoftLabs. Examples guide
-voice only: product claims still have to come from approved knowledge records. When
-the field is blank, the agent uses a built-in owner-style example in the requested
-language and avoids common AI marketing clichés.
+- `app/main.py`
+- `app/services.py`
+- `app/database.py`
+- `tests/test_app.py`
 
-Generated drafts remain editable before publication. Each draft shows the knowledge
-records it cited, and publishing requires confirmation. Website imports are marked
-unreviewed and cannot reach the writing model until you approve them in the dashboard.
+### 1:15–2:25 — Show `generate_post()` in `app/services.py`
 
-`python scripts/import_site.py https://inarisoftlabs.com` imports public site text as one reviewable knowledge entry. Use it as a starting point, not as permission to publish unreviewed claims.
+> This is the core agent loop.
+>
+> First, the agent retrieves only reviewed product knowledge using SQLite full-text search. It also receives reviewed descriptions of product screenshots. The selected assets establish which product the agent is allowed to discuss, so it cannot accidentally combine claims from different products.
+>
+> The model returns structured data containing the caption, cited fact IDs, selected image, hashtags, and a confidence level.
+>
+> But I do not trust the model simply because it returned valid JSON. Python checks whether the answer contains planning text, unsupported fact IDs, the wrong number of hashtags, banned marketing clichés, an invalid image, or an incorrect length.
+>
+> It also compares the caption with recent posts using Jaccard similarity. If a check fails, the agent receives a targeted explanation—such as “this draft is too similar” or “you cited an unavailable fact”—and tries again, up to four times.
+>
+> The key design decision is that the model proposes an action, but deterministic code decides whether that action is acceptable.
 
-### Product knowledge packs
+Scroll through the validation conditions and the retry `variation_note` messages.
 
-Version-controlled knowledge packs let you ground marketing copy in a product's
-actual specifications. Import the LabLink pack with:
+### 2:25–3:15 — Return to the Dashboard and Show a Draft/Event History
 
-```bash
-python3 scripts/import_knowledge_pack.py knowledge/lablink.json
-```
+> I observe the agent through persisted workflow state and an event history.
+>
+> For every post, I can inspect the generated caption, selected visual, confidence, cited facts, current status, publishing errors, and Facebook post ID.
+>
+> The default mode is human approval. I can edit a draft before publication, while automatic publishing remains an explicit configuration choice.
+>
+> For quality, I use three layers: deterministic validation, focused automated tests, and human review—especially for natural Bangladeshi Bangla. For example, this test deliberately makes the first model response too similar to an existing post and verifies that the agent rejects it and generates a different draft.
 
-The importer is safe to repeat: it updates only records with the pack's stable
-IDs and keeps dashboard entries you added manually. The LabLink pack includes
-explicit claim-hold rules for undocumented voice calls and conflicting product
-specifications, so those are not accidentally turned into marketing claims.
+Show `test_generate_post_retries_when_draft_is_too_similar`.
 
-## Safeguards
-
-- Drafts only use knowledge currently stored in the library and ask the model not to invent claims.
-- A similarity check prevents near-duplicate recent posts.
-- Auto-publishing is disabled by default.
-- Failed Facebook sends remain in the dashboard with their error message.
-- Images publish as Facebook photo posts; a selected video publishes as a video post. Facebook credentials never reach the browser.
-- DeepSeek writes the post through its OpenAI-compatible Chat Completions API with JSON output. It does not receive the uploaded image files.
-
-## Production notes
-
-The built-in scheduler runs while the web process is alive. For reliable production delivery, run the app as a persistent service (for example, Docker/Cloud Run with an always-on worker, a VM, or a separate scheduled call to `/api/scheduler/run`). Back up `data/marketing-agent.db` and `data/uploads/` regularly.
-
-Set `APP_ENV=production` in production. The application then refuses to start without
-`DASHBOARD_PASSWORD`. The health check is available at `/healthz`. Set
-`MARKETING_AGENT_DATA_DIR` if the SQLite database and uploads should live outside the
-repository directory.
-
-Only one process should run the built-in scheduler. Set
-`ENABLE_INTERNAL_SCHEDULER=false` on additional web workers and trigger
-`POST /api/scheduler/run` from one authenticated worker or an external scheduler.
-
-## Development checks
+Run these focused tests:
 
 ```bash
-python3 -m pip install -r requirements.txt -r requirements-dev.txt
-ruff check app scripts tests run.py
-ruff format --check app scripts tests run.py
-pytest -q
-node --check public/app.js
+pytest -q tests/test_app.py::test_generation_uses_human_example_and_validates_facts tests/test_app.py::test_generate_post_retries_when_draft_is_too_similar tests/test_app.py::test_unreviewed_imports_are_not_retrieved tests/test_app.py::test_publish_rejects_post_without_an_image
 ```
 
-GitHub Actions runs the Python lint, formatting, and test checks on pushes and pull
-requests.
+Expected result:
 
-## Deploy
-
-The production deployment uses Docker Compose and preserves `data/` on the server.
-
-```bash
-./deploy.sh
+```text
+4 passed
 ```
 
-It deploys to `/home/shampad/projects/isl-marketing-agent` on `192.168.0.131`
-and publishes the dashboard on port `8020`. Use `./deploy.sh --help` to override
-the host, remote path, or port.
+### 3:15–4:10 — Show Publishing and Scheduler Code
+
+> One of the hardest parts was realizing that content quality was only half the problem. Publishing is an external side effect, so retries can accidentally create duplicate posts.
+>
+> I made publishing idempotent using explicit states such as draft, publishing, published, and failed. If a request is repeated after publication, it returns the existing result. The application also detects publishing jobs interrupted during a restart and moves them into a reviewable failed state.
+>
+> Another challenge was natural Bangla. Longer prompts alone did not solve it. I needed locally appropriate writing examples, explicit style boundaries, grounding in reviewed facts, and post-generation validation.
+>
+> Supporting multiple model providers was also interesting because OpenAI, Gemini, and DeepSeek return different response structures. I normalize those differences behind one writer function while keeping the rest of the agent workflow provider-independent.
+
+### 4:10–5:00 — Briefly Show SpeakingDude, Then Return to the Marketing Agent
+
+> I am applying the same lessons in SpeakingDude, a larger Django-based language-learning product. It has an AI facade, interchangeable provider strategies, structured speaking feedback, caching, prompt versions, and deterministic scoring around model output.
+>
+> The main thing I have learned from both projects is that a dependable agent is not just a good prompt. It is a controlled loop around a probabilistic component: constrained context, structured output, validation, retry policy, state, observability, tests, and human escalation.
+>
+> What I am still exploring is better semantic evaluation. Jaccard similarity catches repeated vocabulary, but it does not fully understand whether two posts communicate the same idea. I also want stronger automated evaluation for culturally natural Bangla and better tracking of model latency, cost, and human edit rates.
+>
+> That is the part of agentic engineering I find most interesting: turning useful model behavior into a workflow people can actually trust.
+
+## Tabs to Prepare Before Recording
+
+> [!CAUTION]
+> Keep `.env` completely closed during the recording because it may contain credentials.
+
+Open these in order:
+
+1. The running marketing-agent dashboard.
+2. `app/main.py` around the scheduler (`run_schedule`).
+3. `app/services.py` around the generation loop (`generate_post`).
+4. `tests/test_app.py` around `test_generate_post_retries_when_draft_is_too_similar`.
+5. `app/services.py` around idempotent publishing (`publish_post`).
+6. SpeakingDude’s `sd-backend/src/apps/ai/` folder for the final brief reference.
+
+## Final Recording Checklist
+
+- Start on the dashboard rather than this README.
+- Close `.env` before screen sharing.
+- Increase the editor and terminal font sizes.
+- Hide terminal history that might contain secrets.
+- Disable desktop and browser notifications.
+- Prepare the exact files and line positions in advance.
+- Use the focused test command above instead of the entire test suite.
+- Rehearse the transitions once while timing yourself.
+- Speak naturally; use the script as a guide rather than reading every sentence rigidly.
+
+## LinkedIn Channel
+
+The agent publishes to two channels. Facebook posts target product users (often Bangla); LinkedIn posts target potential clients on the InariSoftLabs Company Page to attract custom software development work.
+
+- Every post stores a `channel` (`facebook` or `linkedin`). LinkedIn drafts are always generated in professional English with a service-focused brief: one concrete workflow from a delivered product as proof, grounded in verified knowledge plus company-level brand facts, with the same deterministic validation (planning markers, fact IDs, hashtag count, banned phrases, 80–220 words, Jaccard similarity) as Facebook.
+- Publishing is per channel and idempotent: `publish_post` claims the row, uploads the image through LinkedIn's register/PUT flow (`/rest/uploads` → binary PUT → `/rest/posts`), and stores `linkedin_post_id`. Video is Facebook-only; LinkedIn requires one product screenshot.
+- When LinkedIn is configured, each due schedule slot also creates a LinkedIn companion post (best-effort; a LinkedIn failure never fails the Facebook slot).
+
+Setup:
+
+1. Create a LinkedIn app, request the **Community Management API** product, and add `http://localhost:8080/linkedin/callback` as a redirect URL.
+2. `python scripts/linkedin_token.py authorize` → approve in the browser as the Company Page admin → `python scripts/linkedin_token.py exchange --code <CODE>`.
+3. `python scripts/linkedin_token.py whoami` lists the Company Pages the token can post to; set `LINKEDIN_AUTHOR_URN` to the `urn:li:organization:<PAGE_ID>` value.
+4. Access tokens expire after ~60 days: `python scripts/linkedin_token.py refresh`.

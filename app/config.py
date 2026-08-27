@@ -22,10 +22,25 @@ class Settings:
     facebook_page_id: str = os.getenv("FACEBOOK_PAGE_ID", "")
     facebook_token: str = os.getenv("FACEBOOK_PAGE_ACCESS_TOKEN", "")
     facebook_version: str = os.getenv("FACEBOOK_GRAPH_VERSION", "vXX.X")
+    linkedin_token: str = os.getenv("LINKEDIN_ACCESS_TOKEN", "")
+    linkedin_author_urn: str = os.getenv("LINKEDIN_AUTHOR_URN", "")
+    linkedin_api_version: str = os.getenv("LINKEDIN_API_VERSION", "202506")
 
     @property
     def facebook_ready(self) -> bool:
         return bool(self.facebook_page_id and self.facebook_token and "XX" not in self.facebook_version)
+
+    @property
+    def linkedin_ready(self) -> bool:
+        return bool(self.linkedin_token and self.linkedin_author_urn)
+
+    @property
+    def linkedin_author(self) -> str:
+        """Accept either a full URN or a bare numeric Company Page ID."""
+        value = self.linkedin_author_urn.strip()
+        if value.isdigit():
+            return f"urn:li:organization:{value}"
+        return value
 
     @property
     def production(self) -> bool:
