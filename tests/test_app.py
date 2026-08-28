@@ -624,3 +624,144 @@ def test_failed_schedule_can_be_retried(isolated_data, monkeypatch):
         asyncio.run(main.run_schedule())
     with database.connect() as db:
         assert db.execute("SELECT count(*) FROM schedule_runs").fetchone()[0] == 0
+
+
+def make_image_file(tmp_path, name="shot.png", size=(1440, 900)):
+    from PIL import Image
+
+    path = tmp_path / "uploads" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", size, (240, 244, 248)).save(path)
+    return path
+
+
+def insert_real_image_asset(asset_id="asset-1", product="LabLink"):
+    path = make_image_file(database.DATA_DIR)
+    with database.connect() as db:
+        db.execute(
+            "INSERT INTO assets (id, original_name, mime_type, path, label, description, product, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (asset_id, "shot.png", "image/png", str(path), f"{product} — Shot", "A visible workflow", product, services.now()),
+        )
+    return asset_id
+
+
+def test_facebook_publish_uploads_composed_social_card(isolated_data, monkeypatch):
+    insert_real_image_asset()
+    post_id = insert_draft(asset_ids=("asset-1",))
+    with database.connect() as db:
+        db.execute("UPDATE posts SET headline=? WHERE id=?", ("রোগী ও ডাক্তার — সব তথ্য এক জায়গায়", post_id))
+    monkeypatch.setattr(
+        services,
+        "settings",
+        SimpleNamespace(facebook_ready=True, facebook_version="v1.0", facebook_page_id="page", facebook_token="token", social_cards=True),
+    )
+    uploads = []
+
+    def fake_multipart(url, fields, file_path, mime_type, field_name="source"):
+        uploads.append((file_path, mime_type))
+        return {"id": "photo-1"}
+
+    monkeypatch.setattr(services, "_facebook_multipart", fake_multipart)
+    monkeypatch.setattr(services, "_facebook_request", lambda url, data: {"id": "facebook-1"})
+
+    services.publish_post(post_id)
+
+    assert uploads, "the photo endpoint must receive an upload"
+    uploaded_path, uploaded_mime = uploads[0]
+    assert uploaded_mime == "image/png"
+    from pathlib import Path
+
+    card = Path(uploaded_path)
+    assert card.name.startswith(post_id), "the lead upload must be the composed card, not the raw screenshot"
+    from PIL import Image
+
+    with Image.open(card) as composed:
+        assert composed.size == (1200, 675)
+
+
+def test_publish_falls_back_to_raw_screenshot_when_composition_fails(isolated_data, monkeypatch):
+    insert_asset()  # path "unused-path" does not exist, so composition must fall back
+    post_id = insert_draft(asset_ids=("asset-1",))
+    monkeypatch.setattr(
+        services,
+        "settings",
+        SimpleNamespace(facebook_ready=True, facebook_version="v1.0", facebook_page_id="page", facebook_token="token", social_cards=True),
+    )
+    uploads = []
+
+    def fake_multipart(url, fields, file_path, mime_type, field_name="source"):
+        uploads.append((file_path, mime_type))
+        return {"id": "photo-1"}
+
+    monkeypatch.setattr(services, "_facebook_multipart", fake_multipart)
+    monkeypatch.setattr(services, "_facebook_request", lambda url, data: {"id": "facebook-1"})
+
+    services.publish_post(post_id)
+
+    assert uploads == [("unused-path", "image/png")]
+
+
+def test_visual_endpoint_serves_composed_card(isolated_data):
+    insert_real_image_asset()
+    post_id = insert_draft(asset_ids=("asset-1",))
+    response = TestClient(main.app).get(f"/api/posts/{post_id}/visual")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    from PIL import Image
+    import io
+
+    with Image.open(io.BytesIO(response.content)) as composed:
+        assert composed.size == (1200, 675)
+
+
+def test_visual_endpoint_returns_404_for_video_posts(isolated_data):
+    insert_asset(mime_type="video/mp4")
+    post_id = insert_draft(asset_ids=("asset-1",))
+    response = TestClient(main.app).get(f"/api/posts/{post_id}/visual")
+    assert response.status_code == 404
+
+
+def test_social_card_renders_bangla_headline(tmp_path):
+    from app.visuals import compose_card
+
+    headline = "রোগী ও ডাক্তার — সব তথ্য এক জায়গায়"
+    from PIL import Image
+
+    # Compact header layout (wide dashboard screenshot).
+    wide_shot = make_image_file(tmp_path, name="wide.png", size=(1440, 900))
+    wide_card = tmp_path / "card-wide.png"
+    compose_card(str(wide_shot), headline, "LabLink", wide_card)
+    with Image.open(wide_card).convert("RGB") as card:
+        histogram = card.crop((56, 58, 1144, 140)).histogram()
+        white_ink = min(histogram[255], histogram[256 + 255], histogram[512 + 255])
+    assert white_ink > 3000, "the Bengali headline must be rendered in the compact header band"
+
+    # Tall header layout (squarish screenshot).
+    square_shot = make_image_file(tmp_path, name="square.png", size=(900, 900))
+    square_card = tmp_path / "card-square.png"
+    compose_card(str(square_shot), headline, "LabLink", square_card)
+    with Image.open(square_card).convert("RGB") as card:
+        histogram = card.crop((56, 100, 1144, 250)).histogram()
+        white_ink = min(histogram[255], histogram[256 + 255], histogram[512 + 255])
+    assert white_ink > 3000, "the Bengali headline must be rendered in the tall header band"
+
+
+def test_wide_screenshots_get_a_compact_header_and_larger_screenshot(tmp_path):
+    from PIL import Image
+
+    from app.visuals import compose_card
+
+    wide_shot = make_image_file(tmp_path, name="wide.png", size=(1440, 900))
+    card_path = compose_card(str(wide_shot), "কোন রিপোর্ট বাকি — এক নজরে", "LabLink", tmp_path / "card.png")
+    with Image.open(card_path).convert("RGB") as card:
+        # Compact header: at y=200 the card must already be past the dark
+        # brand gradient (the tall layout would still show header colours).
+        pixel = card.getpixel((600, 200))
+        assert min(pixel) > 200, f"y=200 must be past the compact header, got {pixel}"
+
+        # The fitted screenshot must dominate the card: sample the centre
+        # column across the body and count non-background samples.
+        body_background = (238, 242, 247)
+        samples = [card.getpixel((600, row)) for row in range(170, 660, 6)]
+        non_background = sum(1 for pixel in samples if pixel != body_background)
+        assert non_background > 60, "the screenshot must fill the enlarged body area"

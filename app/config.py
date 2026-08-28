@@ -25,6 +25,9 @@ class Settings:
     linkedin_token: str = os.getenv("LINKEDIN_ACCESS_TOKEN", "")
     linkedin_author_urn: str = os.getenv("LINKEDIN_AUTHOR_URN", "")
     linkedin_api_version: str = os.getenv("LINKEDIN_API_VERSION", "202506")
+    # Compose branded social cards from product screenshots before publishing.
+    # Disable with SOCIAL_CARDS=false to upload the raw screenshots again.
+    social_cards: bool = os.getenv("SOCIAL_CARDS", "true").lower() != "false"
 
     @property
     def facebook_ready(self) -> bool:

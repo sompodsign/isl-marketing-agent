@@ -19,6 +19,7 @@ from app.config import settings
 from app.database import PROJECT_ROOT, UPLOAD_DIR, connect, initialise
 from app.services import (
     asset_product,
+    asset_records,
     create_and_publish_bangla_post,
     generate_post,
     image_candidates,
@@ -29,8 +30,10 @@ from app.services import (
     list_posts,
     publish_post,
     save_settings,
+    selected_product,
     settings_dict,
 )
+from app.visuals import compose_post_card
 
 logger = logging.getLogger(__name__)
 security = HTTPBasic(auto_error=False)
@@ -426,6 +429,25 @@ def send_post(post_id: str):
         return publish_post(post_id)
     except ValueError as error:
         raise HTTPException(400, str(error)) from error
+
+
+@app.get("/api/posts/{post_id}/visual", dependencies=[Depends(authenticate)])
+def post_visual(post_id: str):
+    """Serve the composed social card for a post so reviewers see the exact
+    image that publishing will upload."""
+    post = next((item for item in list_posts() if item["id"] == post_id), None)
+    if not post:
+        raise HTTPException(404, "Post not found.")
+    images = [asset for asset in asset_records(post["assetIds"]) if asset["mimeType"].startswith("image/")]
+    if not images:
+        raise HTTPException(404, "This post has no product image to preview.")
+    product = selected_product(images)
+    try:
+        card = compose_post_card(post, images[0], product)
+    except Exception:
+        logger.exception("Social card preview failed for post %s.", post_id)
+        raise HTTPException(500, "Could not compose the social card preview.") from None
+    return FileResponse(card, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @app.patch("/api/posts/{post_id}", dependencies=[Depends(authenticate)])

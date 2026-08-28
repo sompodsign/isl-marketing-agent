@@ -15,6 +15,7 @@ import httpx
 
 from app.config import settings
 from app.database import connect, rows
+from app.visuals import compose_post_card
 
 OFFICIAL_CONTACT_EMAIL = "contact@inarisoftlabs.com"
 WEBSITE_URL = "www.inarisoftlabs.com"
@@ -914,6 +915,23 @@ def _linkedin_error_details(error: Exception) -> dict:
     return details
 
 
+def social_card_upload(post: dict, image: dict, product: str) -> tuple[str, str]:
+    """Return (path, mime) of the visual to upload for an image post.
+
+    Prefers the composed branded social card so feeds never show a bare
+    screenshot; falls back to the raw asset if composition fails so publishing
+    is never blocked by the design step.
+    """
+    if not getattr(settings, "social_cards", True):
+        return image["path"], image["mimeType"]
+    try:
+        card = compose_post_card(post, image, product)
+        return str(card), "image/png"
+    except Exception:
+        logger.exception("Social card composition failed; publishing the raw screenshot instead.")
+        return image["path"], image["mimeType"]
+
+
 def publish_post(post_id: str) -> dict:
     post = next((item for item in list_posts() if item["id"] == post_id), None)
     if not post:
@@ -955,7 +973,8 @@ def publish_post(post_id: str) -> dict:
         if is_linkedin:
             author = settings.linkedin_author
             registration = _linkedin_register_image_upload(author)
-            _linkedin_upload_image(registration["uploadUrl"], images[0]["path"], images[0]["mimeType"])
+            upload_path, upload_mime = social_card_upload(post, images[0], product)
+            _linkedin_upload_image(registration["uploadUrl"], upload_path, upload_mime)
             linkedin_post_id = _linkedin_create_post(author, post["caption"], registration["asset"])
             with connect() as db:
                 db.execute(
@@ -976,12 +995,17 @@ def publish_post(post_id: str) -> dict:
                 )
             elif images:
                 uploaded = []
-                for asset in images[:10]:
+                for index, asset in enumerate(images[:10]):
+                    # The lead image gets the composed social card; any extra
+                    # gallery images are attached as the raw screenshots.
+                    upload_path, upload_mime = (
+                        social_card_upload(post, asset, product) if index == 0 else (asset["path"], asset["mimeType"])
+                    )
                     photo = _facebook_multipart(
                         f"https://graph.facebook.com/{settings.facebook_version}/{settings.facebook_page_id}/photos",
                         {"access_token": settings.facebook_token, "published": "false"},
-                        asset["path"],
-                        asset["mimeType"],
+                        upload_path,
+                        upload_mime,
                     )
                     uploaded.append(photo["id"])
                 payload = {"message": post["caption"], "access_token": settings.facebook_token}

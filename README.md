@@ -133,3 +133,13 @@ Setup:
 2. `python scripts/linkedin_token.py authorize` → approve in the browser as the Company Page admin → `python scripts/linkedin_token.py exchange --code <CODE>`.
 3. `python scripts/linkedin_token.py whoami` lists the Company Pages the token can post to; set `LINKEDIN_AUTHOR_URN` to the `urn:li:organization:<PAGE_ID>` value.
 4. Access tokens expire after ~60 days: `python scripts/linkedin_token.py refresh`.
+
+## Social Cards (Composed Post Visuals)
+
+Raw product screenshots look weak in the Facebook feed: small, cropped, and message-free. Before any image post is uploaded, `app/visuals.py` composes a deterministic 1200×675 social card from the selected screenshot:
+
+- Brand header in the product's colours (LabLink/KarbarPro blue-to-teal, Shikha warm coral) with the product logo and an InariSoftLabs wordmark.
+- The model-generated `headline` rendered as large overlay text — Bengali headlines are shaped correctly via Pillow's bundled Raqm with vendored Noto Sans Bengali fonts (`app/assets/fonts`).
+- The screenshot framed on a white mat with rounded corners and a soft drop shadow on a quiet light body.
+
+The card is generated from real pixels only — no generative AI touches the product UI, so the visual always depicts the actual product. `GET /api/posts/{id}/visual` renders the card on demand so the dashboard's post detail shows the exact image publishing will upload (edit a draft and the preview regenerates; results are cached per headline/assets in `data/visuals/`). At publish time the composed card is uploaded for the lead image on both channels; extra Facebook gallery images attach raw. If composition ever fails, publishing falls back to the raw screenshot and logs the exception, and `SOCIAL_CARDS=false` disables the feature entirely.
